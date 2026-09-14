@@ -1,0 +1,22 @@
+{
+  "name": "Spesa",
+  "short_name": "Spesa",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "description": "Lista della spesa condivisa",
+  "icons": [
+    {
+      "src": "https://cdn.jsdelivr.net/npm/@mdi/png@7.4.47/192x192/cart.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://cdn.jsdelivr.net/npm/@mdi/png@7.4.47/512x512/cart.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
