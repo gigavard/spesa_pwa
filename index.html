@@ -63,9 +63,12 @@
 
 <script>
 const API = 'https://script.google.com/macros/s/AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6/exec';
-
+let callbackCounter = 0;
 let utenteCorrente = localStorage.getItem('utenteSpesa');
-if (!utenteCorrente) document.getElementById('sceltaUtente').style.display = 'block';
+
+if (!utenteCorrente) {
+  document.getElementById('sceltaUtente').style.display = 'block';
+}
 aggiornaUtenteUI();
 
 function impostaUtente(nome) {
@@ -86,26 +89,55 @@ function aggiornaUtenteUI() {
   document.getElementById('nomeUtente').textContent = utenteCorrente || 'Nessuno';
 }
 
+function jsonp(params) {
+  return new Promise((resolve, reject) => {
+    const callbackName = '__spesaJsonp' + Date.now() + '_' + (++callbackCounter);
+    const script = document.createElement('script');
+    const timeout = setTimeout(() => cleanup(new Error('Timeout nella lettura del backend.')), 10000);
+
+    function cleanup(error, data) {
+      clearTimeout(timeout);
+      if (script.parentNode) script.parentNode.removeChild(script);
+      try { delete window[callbackName]; } catch (_) { window[callbackName] = undefined; }
+      if (error) reject(error); else resolve(data);
+    }
+
+    window[callbackName] = data => cleanup(null, data);
+    script.onerror = () => cleanup(new Error('Impossibile leggere il backend.'));
+
+    const query = new URLSearchParams({
+      ...params,
+      callback: callbackName,
+      _: String(Date.now())
+    });
+
+    script.src = API + '?' + query.toString();
+    document.head.appendChild(script);
+  });
+}
+
 async function caricaLista() {
   try {
-    const response = await fetch(API + '?action=lista');
-    const dati = await parseJsonResponse(response);
+    const dati = await jsonp({ action: 'lista' });
     if (!dati.ok) throw new Error(dati.messaggio || 'Errore');
     mostraLista(dati.lista);
+    return dati.lista;
   } catch (error) {
     mostraErrore(error);
+    throw error;
   }
 }
 
 function mostraLista(lista) {
   const contenitore = document.getElementById('lista');
   contenitore.innerHTML = '';
+
   if (!lista || lista.length === 0) {
     contenitore.innerHTML = '<div class="vuota">Niente da comprare.</div>';
     return;
   }
 
-  lista.forEach(function(item) {
+  lista.forEach(item => {
     const riga = document.createElement('div');
     riga.className = 'riga-prodotto';
 
@@ -116,7 +148,7 @@ function mostraLista(lista) {
     const meno = document.createElement('button');
     meno.className = 'azione';
     meno.textContent = '−';
-    meno.onclick = () => eseguiGet('diminuisci', item.riga);
+    meno.onclick = () => eseguiScrittura({ action: 'diminuisci', riga: item.riga });
 
     const quantita = document.createElement('div');
     quantita.className = 'quantita';
@@ -125,24 +157,41 @@ function mostraLista(lista) {
     const piu = document.createElement('button');
     piu.className = 'azione';
     piu.textContent = '+';
-    piu.onclick = () => eseguiGet('aumenta', item.riga);
+    piu.onclick = () => eseguiScrittura({ action: 'aumenta', riga: item.riga });
 
     const cestino = document.createElement('button');
     cestino.className = 'azione';
     cestino.textContent = '🗑';
-    cestino.onclick = () => eseguiGet('rimuovi', item.riga);
+    cestino.onclick = () => eseguiScrittura({ action: 'rimuovi', riga: item.riga });
 
     riga.append(nome, meno, quantita, piu, cestino);
     contenitore.appendChild(riga);
   });
 }
 
-async function parseJsonResponse(response) {
-  const text = await response.text();
+async function postSenzaCors(dati) {
+  await fetch(API, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8'
+    },
+    body: JSON.stringify(dati)
+  });
+}
+
+async function eseguiScrittura(dati, messaggioSuccesso) {
   try {
-    return JSON.parse(text);
-  } catch (_) {
-    throw new Error('Il backend ha restituito una pagina HTML invece di JSON.');
+    await postSenzaCors(dati);
+    await attesa(500);
+    await caricaLista();
+    if (messaggioSuccesso) {
+      document.getElementById('messaggio').textContent = messaggioSuccesso;
+    } else {
+      document.getElementById('messaggio').textContent = '';
+    }
+  } catch (error) {
+    mostraErrore(error);
   }
 }
 
@@ -150,6 +199,7 @@ async function aggiungi() {
   const input = document.getElementById('prodotto');
   const messaggio = document.getElementById('messaggio');
   const testo = input.value.trim();
+
   if (!testo) return;
   if (!utenteCorrente) {
     messaggio.textContent = 'Seleziona prima Giulio oppure Alice.';
@@ -157,27 +207,28 @@ async function aggiungi() {
   }
 
   messaggio.textContent = 'Aggiungo...';
-  try {
-    const url = API + '?action=aggiungi&testo=' + encodeURIComponent(testo) + '&utente=' + encodeURIComponent(utenteCorrente);
-    const response = await fetch(url);
-    const risposta = await parseJsonResponse(response);
-    messaggio.textContent = risposta.messaggio || 'Fatto.';
-    if (risposta.ok) {
-      input.value = '';
-      input.focus();
-      await caricaLista();
-    }
-  } catch (error) {
-    mostraErrore(error);
-  }
-}
 
-async function eseguiGet(action, riga) {
   try {
-    const response = await fetch(API + '?action=' + encodeURIComponent(action) + '&riga=' + encodeURIComponent(riga));
-    const risposta = await parseJsonResponse(response);
-    if (!risposta.ok) throw new Error(risposta.messaggio || 'Errore');
+    const lista = await caricaLista();
+    const parsed = parseInputClient(testo);
+    const giaPresente = lista.find(item => normalizzaClient(item.prodotto) === normalizzaClient(parsed.prodotto));
+
+    if (giaPresente) {
+      messaggio.textContent = `${giaPresente.prodotto} è già presente in quantità ${giaPresente.quantita}.`;
+      return;
+    }
+
+    await postSenzaCors({
+      action: 'aggiungi',
+      testo: testo,
+      utente: utenteCorrente
+    });
+
+    await attesa(500);
     await caricaLista();
+    input.value = '';
+    input.focus();
+    messaggio.textContent = `${parsed.prodotto} aggiunto.`;
   } catch (error) {
     mostraErrore(error);
   }
@@ -185,39 +236,48 @@ async function eseguiGet(action, riga) {
 
 async function chiudiSpesa() {
   if (!confirm('Confermi che la spesa è fatta? La lista verrà salvata nello storico e poi svuotata.')) return;
-  try {
-    const response = await fetch(API + '?action=chiudi');
-    const risposta = await parseJsonResponse(response);
-    document.getElementById('messaggio').textContent = risposta.messaggio || 'Fatto.';
-    if (!risposta.ok) throw new Error(risposta.messaggio || 'Errore');
-    await caricaLista();
-  } catch (error) {
-    mostraErrore(error);
-  }
+  await eseguiScrittura({ action: 'chiudi' }, 'Spesa salvata nello storico.');
 }
 
 async function confermaPulisciStorico() {
   if (!confirm('Vuoi davvero cancellare tutto lo storico?')) return;
-  try {
-    const response = await fetch(API + '?action=pulisciStorico');
-    const risposta = await parseJsonResponse(response);
-    if (!risposta.ok) throw new Error(risposta.messaggio || 'Errore');
-    document.getElementById('messaggio').textContent = 'Storico pulito.';
-  } catch (error) {
-    mostraErrore(error);
-  }
+  await eseguiScrittura({ action: 'pulisciStorico' }, 'Storico pulito.');
+}
+
+function parseInputClient(input) {
+  const testo = input.trim();
+  const match = testo.match(/^(\d+)\s+(.+)$/);
+  let prodotto = match ? match[2] : testo;
+  prodotto = prodotto.trim().replace(/\s+/g, ' ');
+  prodotto = prodotto.charAt(0).toUpperCase() + prodotto.slice(1);
+  return { prodotto };
+}
+
+function normalizzaClient(testo) {
+  return String(testo || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function attesa(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function mostraErrore(error) {
   document.getElementById('messaggio').textContent = 'Errore: ' + error.message;
 }
 
-document.getElementById('prodotto').addEventListener('keydown', function(event) {
+document.getElementById('prodotto').addEventListener('keydown', event => {
   if (event.key === 'Enter') aggiungi();
 });
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
-caricaLista();
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js');
+}
+
+caricaLista().catch(() => {});
 </script>
 </body>
 </html>
