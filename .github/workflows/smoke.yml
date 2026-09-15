@@ -1,0 +1,36 @@
+name: Smoke tests
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check GitHub Pages frontend
+        run: |
+          set -euo pipefail
+          html=$(curl -fsSL https://gigavard.github.io/spesa_pwa/)
+          echo "$html" | grep -q '<title>Spesa</title>'
+          echo "$html" | grep -q 'AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6'
+
+      - name: Check Apps Script read endpoint via JSONP
+        run: |
+          set -euo pipefail
+          body=$(curl -fsSL 'https://script.google.com/macros/s/AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6/exec?action=lista&callback=smoke')
+          echo "$body"
+          echo "$body" | grep -q '^smoke('
+          echo "$body" | grep -q '"ok":true'
+
+      - name: Check Apps Script POST route without changing data
+        run: |
+          set -euo pipefail
+          body=$(curl -fsSL -L \
+            -H 'Content-Type: text/plain;charset=utf-8' \
+            --data '{"action":"__smoke__"}' \
+            'https://script.google.com/macros/s/AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6/exec')
+          echo "$body"
+          echo "$body" | grep -q '"ok":false'
+          echo "$body" | grep -q 'Azione POST non riconosciuta'
