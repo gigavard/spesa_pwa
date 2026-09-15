@@ -1,0 +1,29 @@
+name: Deploy Apps Script
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'apps-script/**'
+      - '.clasp.json'
+      - 'scripts/deploy-apps-script.sh'
+      - '.github/workflows/deploy-apps-script.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Deploy Apps Script
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          DEPLOYMENT_ID: AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6
+        run: bash scripts/deploy-apps-script.sh
