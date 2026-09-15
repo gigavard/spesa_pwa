@@ -4,16 +4,14 @@ const NOME_STORICO = 'Storico';
 /*
  * WEB APP / API
  *
- * La PWA GitHub Pages usa GET anche per le azioni di scrittura.
- * Non è REST ideale, ma evita i problemi di redirect/CORS del POST
- * tra GitHub Pages e Apps Script. Per questa piccola app familiare
- * manteniamo l'API volutamente semplice e specifica.
+ * Letture: GET + JSONP, così il frontend GitHub Pages non dipende dal CORS.
+ * Scritture: POST, così non modifichiamo dati tramite GET.
  */
 function doGet(e) {
   const p = e && e.parameter ? e.parameter : {};
   const action = p.action || '';
 
-  // Apertura diretta dell'URL Apps Script: manteniamo la vecchia UI.
+  // Apertura diretta dell'URL Apps Script: manteniamo la UI originale.
   if (!action) {
     return HtmlService
       .createHtmlOutputFromFile('Index')
@@ -31,56 +29,22 @@ function doGet(e) {
         };
         break;
 
-      case 'aggiungi':
-        risposta = aggiungiProdotto(
-          p.testo,
-          p.utente
-        );
-        break;
-
-      case 'aumenta':
-        aumentaQuantita(validaRiga(p.riga));
-        risposta = { ok: true };
-        break;
-
-      case 'diminuisci':
-        diminuisciQuantita(validaRiga(p.riga));
-        risposta = { ok: true };
-        break;
-
-      case 'rimuovi':
-        rimuoviProdotto(validaRiga(p.riga));
-        risposta = { ok: true };
-        break;
-
-      case 'chiudi':
-        risposta = chiudiSpesa();
-        break;
-
-      case 'pulisciStorico':
-        pulisciStorico();
-        risposta = { ok: true };
-        break;
-
       default:
         risposta = {
           ok: false,
-          messaggio: 'Azione non riconosciuta.'
+          messaggio: 'Azione GET non riconosciuta.'
         };
     }
 
-    return jsonResponse(risposta);
+    return apiResponse(risposta, p.callback);
   } catch (error) {
-    return jsonResponse({
+    return apiResponse({
       ok: false,
       messaggio: error.message
-    });
+    }, p.callback);
   }
 }
 
-/*
- * Manteniamo anche POST per compatibilità con eventuali client futuri.
- */
 function doPost(e) {
   try {
     const dati = JSON.parse(e.postData.contents || '{}');
@@ -91,44 +55,65 @@ function doPost(e) {
       case 'aggiungi':
         risposta = aggiungiProdotto(dati.testo, dati.utente);
         break;
+
       case 'aumenta':
         aumentaQuantita(validaRiga(dati.riga));
         risposta = { ok: true };
         break;
+
       case 'diminuisci':
         diminuisciQuantita(validaRiga(dati.riga));
         risposta = { ok: true };
         break;
+
       case 'rimuovi':
         rimuoviProdotto(validaRiga(dati.riga));
         risposta = { ok: true };
         break;
+
       case 'chiudi':
         risposta = chiudiSpesa();
         break;
+
       case 'pulisciStorico':
         pulisciStorico();
         risposta = { ok: true };
         break;
+
       default:
         risposta = {
           ok: false,
-          messaggio: 'Azione non riconosciuta.'
+          messaggio: 'Azione POST non riconosciuta.'
         };
     }
 
-    return jsonResponse(risposta);
+    return apiResponse(risposta);
   } catch (error) {
-    return jsonResponse({
+    return apiResponse({
       ok: false,
       messaggio: error.message
     });
   }
 }
 
-function jsonResponse(dati) {
+function apiResponse(dati, callback) {
+  const json = JSON.stringify(dati);
+
+  if (callback) {
+    // Accettiamo solo nomi callback JavaScript semplici/sicuri.
+    if (!/^[A-Za-z_$][0-9A-Za-z_$]*$/.test(callback)) {
+      return ContentService
+        .createTextOutput('/* callback non valida */')
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
+    }
+
+    return ContentService
+      .createTextOutput(callback + '(' + json + ');')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
   return ContentService
-    .createTextOutput(JSON.stringify(dati))
+    .createTextOutput(json)
     .setMimeType(ContentService.MimeType.JSON);
 }
 
