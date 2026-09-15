@@ -13,13 +13,15 @@
     .utente button { margin-left: 8px; }
     .input-row { display: flex; gap: 8px; }
     input { flex: 1; min-width: 0; font-size: 22px; padding: 14px; box-sizing: border-box; }
+    button { touch-action: manipulation; }
     .add-button { font-size: 20px; padding: 14px 18px; }
     #messaggio { margin-top: 16px; min-height: 24px; font-size: 18px; }
     #lista { margin-top: 28px; }
     .riga-prodotto { display: flex; align-items: center; gap: 8px; padding: 12px 0; border-bottom: 1px solid #ddd; }
-    .nome-prodotto { flex: 1; font-size: 21px; }
+    .nome-prodotto { flex: 1; font-size: 21px; overflow-wrap: anywhere; }
     .quantita { min-width: 28px; text-align: center; font-size: 20px; font-weight: bold; }
     .azione { width: 42px; height: 42px; border: none; border-radius: 8px; font-size: 22px; cursor: pointer; }
+    .azione:disabled, .add-button:disabled, .azione-principale:disabled, .azione-secondaria:disabled { opacity: .45; cursor: default; }
     .vuota { font-size: 18px; color: #666; }
     .azione-principale { width: 100%; padding: 14px; font-size: 20px; }
     .azione-secondaria { width: 100%; padding: 12px; font-size: 16px; }
@@ -47,24 +49,26 @@
 
   <div class="input-row">
     <input id="prodotto" type="text" placeholder="Es. 2 latte" autofocus>
-    <button class="add-button" onclick="aggiungi()">Aggiungi</button>
+    <button id="btnAggiungi" class="add-button" onclick="aggiungi()">Aggiungi</button>
   </div>
 
   <div id="messaggio"></div>
   <div id="lista"></div>
 
   <div style="margin-top:32px;">
-    <button class="azione-principale" onclick="chiudiSpesa()">✅ Spesa fatta</button>
+    <button id="btnChiudi" class="azione-principale" onclick="chiudiSpesa()">✅ Spesa fatta</button>
   </div>
 
   <div style="margin-top:12px;">
-    <button class="azione-secondaria" onclick="confermaPulisciStorico()">🧹 Pulisci storico</button>
+    <button id="btnPulisci" class="azione-secondaria" onclick="confermaPulisciStorico()">🧹 Pulisci storico</button>
   </div>
 
 <script>
 const API = 'https://script.google.com/macros/s/AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6/exec';
 let callbackCounter = 0;
 let utenteCorrente = localStorage.getItem('utenteSpesa');
+let listaCorrente = [];
+let operazioneInCorso = false;
 
 if (!utenteCorrente) {
   document.getElementById('sceltaUtente').style.display = 'block';
@@ -87,6 +91,15 @@ function cambiaUtente() {
 
 function aggiornaUtenteUI() {
   document.getElementById('nomeUtente').textContent = utenteCorrente || 'Nessuno';
+}
+
+function setBusy(busy) {
+  operazioneInCorso = busy;
+  document.getElementById('prodotto').disabled = busy;
+  document.getElementById('btnAggiungi').disabled = busy;
+  document.getElementById('btnChiudi').disabled = busy;
+  document.getElementById('btnPulisci').disabled = busy;
+  document.querySelectorAll('.azione').forEach(btn => btn.disabled = busy);
 }
 
 function jsonp(params) {
@@ -116,12 +129,17 @@ function jsonp(params) {
   });
 }
 
+async function leggiLista() {
+  const dati = await jsonp({ action: 'lista' });
+  if (!dati.ok) throw new Error(dati.messaggio || 'Errore');
+  return dati.lista || [];
+}
+
 async function caricaLista() {
   try {
-    const dati = await jsonp({ action: 'lista' });
-    if (!dati.ok) throw new Error(dati.messaggio || 'Errore');
-    mostraLista(dati.lista);
-    return dati.lista;
+    listaCorrente = await leggiLista();
+    mostraLista(listaCorrente);
+    return listaCorrente;
   } catch (error) {
     mostraErrore(error);
     throw error;
@@ -148,7 +166,8 @@ function mostraLista(lista) {
     const meno = document.createElement('button');
     meno.className = 'azione';
     meno.textContent = '−';
-    meno.onclick = () => eseguiScrittura({ action: 'diminuisci', riga: item.riga });
+    meno.disabled = operazioneInCorso;
+    meno.onclick = () => cambiaQuantita(item, -1);
 
     const quantita = document.createElement('div');
     quantita.className = 'quantita';
@@ -157,12 +176,14 @@ function mostraLista(lista) {
     const piu = document.createElement('button');
     piu.className = 'azione';
     piu.textContent = '+';
-    piu.onclick = () => eseguiScrittura({ action: 'aumenta', riga: item.riga });
+    piu.disabled = operazioneInCorso;
+    piu.onclick = () => cambiaQuantita(item, 1);
 
     const cestino = document.createElement('button');
     cestino.className = 'azione';
     cestino.textContent = '🗑';
-    cestino.onclick = () => eseguiScrittura({ action: 'rimuovi', riga: item.riga });
+    cestino.disabled = operazioneInCorso;
+    cestino.onclick = () => rimuovi(item);
 
     riga.append(nome, meno, quantita, piu, cestino);
     contenitore.appendChild(riga);
@@ -173,29 +194,85 @@ async function postSenzaCors(dati) {
   await fetch(API, {
     method: 'POST',
     mode: 'no-cors',
-    headers: {
-      'Content-Type': 'text/plain;charset=utf-8'
-    },
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(dati)
   });
 }
 
-async function eseguiScrittura(dati, messaggioSuccesso) {
-  try {
-    await postSenzaCors(dati);
-    await attesa(500);
-    await caricaLista();
-    if (messaggioSuccesso) {
-      document.getElementById('messaggio').textContent = messaggioSuccesso;
-    } else {
-      document.getElementById('messaggio').textContent = '';
+async function attendiStato(predicate, descrizione) {
+  const tentativi = 15;
+
+  for (let i = 0; i < tentativi; i++) {
+    const lista = await leggiLista();
+    listaCorrente = lista;
+
+    if (predicate(lista)) {
+      mostraLista(lista);
+      return lista;
     }
+
+    await attesa(300);
+  }
+
+  listaCorrente = await leggiLista();
+  mostraLista(listaCorrente);
+  throw new Error('Il foglio è stato aggiornato, ma il frontend non ha confermato in tempo: ' + descrizione + '.');
+}
+
+function trovaInLista(lista, prodotto) {
+  const key = normalizzaClient(prodotto);
+  return lista.find(item => normalizzaClient(item.prodotto) === key);
+}
+
+async function cambiaQuantita(item, delta) {
+  if (operazioneInCorso) return;
+
+  const quantitaPrima = item.quantita;
+  const action = delta > 0 ? 'aumenta' : 'diminuisci';
+
+  setBusy(true);
+  document.getElementById('messaggio').textContent = '';
+
+  try {
+    await postSenzaCors({ action, prodotto: item.prodotto });
+
+    await attendiStato(lista => {
+      const aggiornato = trovaInLista(lista, item.prodotto);
+      if (delta > 0) return !!aggiornato && aggiornato.quantita === quantitaPrima + 1;
+      if (quantitaPrima > 1) return !!aggiornato && aggiornato.quantita === quantitaPrima - 1;
+      return !aggiornato;
+    }, action + ' ' + item.prodotto);
   } catch (error) {
     mostraErrore(error);
+  } finally {
+    setBusy(false);
+    mostraLista(listaCorrente);
+  }
+}
+
+async function rimuovi(item) {
+  if (operazioneInCorso) return;
+
+  setBusy(true);
+  document.getElementById('messaggio').textContent = '';
+
+  try {
+    await postSenzaCors({ action: 'rimuovi', prodotto: item.prodotto });
+    await attendiStato(
+      lista => !trovaInLista(lista, item.prodotto),
+      'rimozione ' + item.prodotto
+    );
+  } catch (error) {
+    mostraErrore(error);
+  } finally {
+    setBusy(false);
+    mostraLista(listaCorrente);
   }
 }
 
 async function aggiungi() {
+  if (operazioneInCorso) return;
+
   const input = document.getElementById('prodotto');
   const messaggio = document.getElementById('messaggio');
   const testo = input.value.trim();
@@ -206,51 +283,92 @@ async function aggiungi() {
     return;
   }
 
+  const parsed = parseInputClient(testo);
+  const giaPresente = trovaInLista(listaCorrente, parsed.prodotto);
+
+  if (giaPresente) {
+    messaggio.textContent = `${giaPresente.prodotto} è già presente in quantità ${giaPresente.quantita}.`;
+    return;
+  }
+
+  setBusy(true);
   messaggio.textContent = 'Aggiungo...';
 
   try {
-    const lista = await caricaLista();
-    const parsed = parseInputClient(testo);
-    const giaPresente = lista.find(item => normalizzaClient(item.prodotto) === normalizzaClient(parsed.prodotto));
+    await postSenzaCors({ action: 'aggiungi', testo, utente: utenteCorrente });
 
-    if (giaPresente) {
-      messaggio.textContent = `${giaPresente.prodotto} è già presente in quantità ${giaPresente.quantita}.`;
-      return;
-    }
+    await attendiStato(lista => {
+      const aggiunto = trovaInLista(lista, parsed.prodotto);
+      return !!aggiunto && aggiunto.quantita === parsed.quantita;
+    }, 'aggiunta ' + parsed.prodotto);
 
-    await postSenzaCors({
-      action: 'aggiungi',
-      testo: testo,
-      utente: utenteCorrente
-    });
-
-    await attesa(500);
-    await caricaLista();
     input.value = '';
-    input.focus();
     messaggio.textContent = `${parsed.prodotto} aggiunto.`;
   } catch (error) {
     mostraErrore(error);
+  } finally {
+    setBusy(false);
+    mostraLista(listaCorrente);
+    if (!input.disabled) input.focus();
   }
 }
 
 async function chiudiSpesa() {
+  if (operazioneInCorso) return;
+  if (!listaCorrente.length) {
+    document.getElementById('messaggio').textContent = 'La lista è già vuota.';
+    return;
+  }
   if (!confirm('Confermi che la spesa è fatta? La lista verrà salvata nello storico e poi svuotata.')) return;
-  await eseguiScrittura({ action: 'chiudi' }, 'Spesa salvata nello storico.');
+
+  setBusy(true);
+  document.getElementById('messaggio').textContent = 'Salvo la spesa...';
+
+  try {
+    await postSenzaCors({ action: 'chiudi' });
+    await attendiStato(lista => lista.length === 0, 'chiusura spesa');
+    document.getElementById('messaggio').textContent = 'Spesa salvata nello storico.';
+  } catch (error) {
+    mostraErrore(error);
+  } finally {
+    setBusy(false);
+    mostraLista(listaCorrente);
+  }
 }
 
 async function confermaPulisciStorico() {
+  if (operazioneInCorso) return;
   if (!confirm('Vuoi davvero cancellare tutto lo storico?')) return;
-  await eseguiScrittura({ action: 'pulisciStorico' }, 'Storico pulito.');
+
+  setBusy(true);
+  document.getElementById('messaggio').textContent = 'Pulisco lo storico...';
+
+  try {
+    await postSenzaCors({ action: 'pulisciStorico' });
+    await attesa(600);
+    document.getElementById('messaggio').textContent = 'Storico pulito.';
+  } catch (error) {
+    mostraErrore(error);
+  } finally {
+    setBusy(false);
+    mostraLista(listaCorrente);
+  }
 }
 
 function parseInputClient(input) {
   const testo = input.trim();
   const match = testo.match(/^(\d+)\s+(.+)$/);
-  let prodotto = match ? match[2] : testo;
+  let quantita = 1;
+  let prodotto = testo;
+
+  if (match) {
+    quantita = parseInt(match[1], 10);
+    prodotto = match[2];
+  }
+
   prodotto = prodotto.trim().replace(/\s+/g, ' ');
   prodotto = prodotto.charAt(0).toUpperCase() + prodotto.slice(1);
-  return { prodotto };
+  return { prodotto, quantita };
 }
 
 function normalizzaClient(testo) {
