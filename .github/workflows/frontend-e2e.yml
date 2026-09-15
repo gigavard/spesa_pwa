@@ -1,0 +1,43 @@
+name: Frontend browser test
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'index.html'
+      - 'tests/**'
+      - '.github/workflows/frontend-e2e.yml'
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install --save-dev @playwright/test@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Wait for GitHub Pages and run browser test
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 24); do
+            html=$(curl -fsSL "https://gigavard.github.io/spesa_pwa/?sha=${GITHUB_SHA}&i=${i}" || true)
+            if echo "$html" | grep -q 'riconciliaInBackground'; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ok" -eq 1
+          npx playwright test tests/frontend.spec.js --reporter=line
