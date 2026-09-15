@@ -10,41 +10,575 @@
 
   <title>Spesa</title>
 
-  <link rel="manifest" href="manifest.json">
+  <link rel="manifest" href="./manifest.json">
 
-  <link rel="icon"
-        href="https://cdn.jsdelivr.net/npm/@mdi/png@7.4.47/192x192/cart.png">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 500px;
+      margin: 24px auto;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 30px;
+      margin-bottom: 20px;
+    }
+
+    .utente {
+      margin-bottom: 20px;
+      font-size: 16px;
+    }
+
+    .utente button {
+      margin-left: 8px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    input {
+      flex: 1;
+      min-width: 0;
+      font-size: 22px;
+      padding: 14px;
+      box-sizing: border-box;
+    }
+
+    .add-button {
+      font-size: 20px;
+      padding: 14px 18px;
+    }
+
+    #messaggio {
+      margin-top: 16px;
+      min-height: 24px;
+      font-size: 18px;
+    }
+
+    #lista {
+      margin-top: 28px;
+    }
+
+    .riga-prodotto {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 0;
+      border-bottom: 1px solid #ddd;
+    }
+
+    .nome-prodotto {
+      flex: 1;
+      font-size: 21px;
+    }
+
+    .quantita {
+      min-width: 28px;
+      text-align: center;
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .azione {
+      width: 42px;
+      height: 42px;
+      border: none;
+      border-radius: 8px;
+      font-size: 22px;
+      cursor: pointer;
+    }
+
+    .vuota {
+      font-size: 18px;
+      color: #666;
+    }
+
+    .azione-principale {
+      width: 100%;
+      padding: 14px;
+      font-size: 20px;
+    }
+
+    .azione-secondaria {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+    }
+
+    #sceltaUtente {
+      margin-bottom: 24px;
+      padding: 18px;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+    }
+
+    .scelta-titolo {
+      font-size: 20px;
+      margin-bottom: 14px;
+    }
+
+    .scelta-bottoni {
+      display: flex;
+      gap: 12px;
+    }
+
+    .scelta-bottoni button {
+      flex: 1;
+      padding: 16px;
+      font-size: 20px;
+    }
+  </style>
 </head>
 
 <body>
 
-<iframe
-  src="https://script.google.com/macros/s/AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6/exec"
-  allow="clipboard-read; clipboard-write"
-></iframe>
+<h1>🛒 Spesa</h1>
+
+<div id="sceltaUtente" style="display:none;">
+  <div class="scelta-titolo">
+    Chi usa questa app?
+  </div>
+
+  <div class="scelta-bottoni">
+    <button onclick="impostaUtente('Giulio')">
+      Giulio
+    </button>
+
+    <button onclick="impostaUtente('Alice')">
+      Alice
+    </button>
+  </div>
+</div>
+
+<div class="utente">
+  Utente:
+  <strong id="nomeUtente"></strong>
+  <button onclick="cambiaUtente()">Cambia</button>
+</div>
+
+<div class="input-row">
+
+  <input
+    id="prodotto"
+    type="text"
+    placeholder="Es. 2 latte"
+    autofocus
+  >
+
+  <button class="add-button" onclick="aggiungi()">
+    Aggiungi
+  </button>
+
+</div>
+
+<div id="messaggio"></div>
+
+<div id="lista"></div>
+
+<div style="margin-top:32px;">
+  <button class="azione-principale" onclick="chiudiSpesa()">
+    ✅ Spesa fatta
+  </button>
+</div>
+
+<div style="margin-top:12px;">
+  <button class="azione-secondaria" onclick="confermaPulisciStorico()">
+    🧹 Pulisci storico
+  </button>
+</div>
+
 
 <script>
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js');
+
+const API =
+  'https://script.google.com/macros/s/AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6/exec';
+
+
+let utenteCorrente =
+  localStorage.getItem('utenteSpesa');
+
+
+if (!utenteCorrente) {
+  document.getElementById('sceltaUtente').style.display = 'block';
+}
+
+aggiornaUtenteUI();
+
+
+function impostaUtente(nome) {
+
+  utenteCorrente = nome;
+
+  localStorage.setItem(
+    'utenteSpesa',
+    nome
+  );
+
+  document.getElementById('sceltaUtente').style.display = 'none';
+
+  aggiornaUtenteUI();
+}
+
+
+function cambiaUtente() {
+
+  localStorage.removeItem('utenteSpesa');
+
+  utenteCorrente = null;
+
+  document.getElementById('sceltaUtente').style.display = 'block';
+
+  aggiornaUtenteUI();
+}
+
+
+function aggiornaUtenteUI() {
+
+  document.getElementById('nomeUtente').textContent =
+    utenteCorrente || 'Nessuno';
+}
+
+
+/*
+ * LETTURA LISTA
+ */
+async function caricaLista() {
+
+  try {
+
+    const response =
+      await fetch(
+        API + '?action=lista'
+      );
+
+    const dati =
+      await response.json();
+
+    if (!dati.ok) {
+      throw new Error(dati.messaggio);
+    }
+
+    mostraLista(dati.lista);
+
+  } catch (error) {
+
+    mostraErrore(error);
   }
+}
+
+
+function mostraLista(lista) {
+
+  const contenitore =
+    document.getElementById('lista');
+
+  contenitore.innerHTML = '';
+
+  if (!lista || lista.length === 0) {
+
+    contenitore.innerHTML =
+      '<div class="vuota">Niente da comprare.</div>';
+
+    return;
+  }
+
+  lista.forEach(function(item) {
+
+    const riga =
+      document.createElement('div');
+
+    riga.className =
+      'riga-prodotto';
+
+
+    const nome =
+      document.createElement('div');
+
+    nome.className =
+      'nome-prodotto';
+
+    nome.textContent =
+      item.prodotto;
+
+
+    const meno =
+      document.createElement('button');
+
+    meno.className = 'azione';
+    meno.textContent = '−';
+
+    meno.onclick = function() {
+      esegui(
+        'diminuisci',
+        item.riga
+      );
+    };
+
+
+    const quantita =
+      document.createElement('div');
+
+    quantita.className =
+      'quantita';
+
+    quantita.textContent =
+      item.quantita;
+
+
+    const piu =
+      document.createElement('button');
+
+    piu.className = 'azione';
+    piu.textContent = '+';
+
+    piu.onclick = function() {
+      esegui(
+        'aumenta',
+        item.riga
+      );
+    };
+
+
+    const cestino =
+      document.createElement('button');
+
+    cestino.className = 'azione';
+    cestino.textContent = '🗑';
+
+    cestino.onclick = function() {
+      esegui(
+        'rimuovi',
+        item.riga
+      );
+    };
+
+
+    riga.appendChild(nome);
+    riga.appendChild(meno);
+    riga.appendChild(quantita);
+    riga.appendChild(piu);
+    riga.appendChild(cestino);
+
+    contenitore.appendChild(riga);
+  });
+}
+
+
+/*
+ * CHIAMATE POST
+ */
+async function post(dati) {
+
+  const response =
+    await fetch(API, {
+      method: 'POST',
+
+      /*
+       * text/plain evita il preflight CORS
+       * di application/json.
+       */
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+
+      body:
+        JSON.stringify(dati)
+    });
+
+  return await response.json();
+}
+
+
+async function aggiungi() {
+
+  const input =
+    document.getElementById('prodotto');
+
+  const messaggio =
+    document.getElementById('messaggio');
+
+  const testo =
+    input.value.trim();
+
+
+  if (!testo) {
+    return;
+  }
+
+
+  if (!utenteCorrente) {
+
+    messaggio.textContent =
+      'Seleziona prima Giulio oppure Alice.';
+
+    return;
+  }
+
+
+  messaggio.textContent =
+    'Aggiungo...';
+
+
+  try {
+
+    const risposta =
+      await post({
+        action: 'aggiungi',
+        testo: testo,
+        utente: utenteCorrente
+      });
+
+
+    messaggio.textContent =
+      risposta.messaggio || 'Fatto.';
+
+
+    if (risposta.ok) {
+
+      input.value = '';
+
+      input.focus();
+
+      await caricaLista();
+    }
+
+  } catch (error) {
+
+    mostraErrore(error);
+  }
+}
+
+
+async function esegui(action, riga) {
+
+  try {
+
+    const risposta =
+      await post({
+        action: action,
+        riga: riga
+      });
+
+
+    if (!risposta.ok) {
+      throw new Error(
+        risposta.messaggio || 'Errore'
+      );
+    }
+
+
+    await caricaLista();
+
+  } catch (error) {
+
+    mostraErrore(error);
+  }
+}
+
+
+async function chiudiSpesa() {
+
+  const conferma =
+    confirm(
+      'Confermi che la spesa è fatta? La lista verrà salvata nello storico e poi svuotata.'
+    );
+
+
+  if (!conferma) {
+    return;
+  }
+
+
+  try {
+
+    const risposta =
+      await post({
+        action: 'chiudi'
+      });
+
+
+    document.getElementById('messaggio').textContent =
+      risposta.messaggio;
+
+
+    await caricaLista();
+
+  } catch (error) {
+
+    mostraErrore(error);
+  }
+}
+
+
+async function confermaPulisciStorico() {
+
+  const conferma =
+    confirm(
+      'Vuoi davvero cancellare tutto lo storico?'
+    );
+
+
+  if (!conferma) {
+    return;
+  }
+
+
+  try {
+
+    const risposta =
+      await post({
+        action: 'pulisciStorico'
+      });
+
+
+    if (!risposta.ok) {
+      throw new Error(
+        risposta.messaggio || 'Errore'
+      );
+    }
+
+
+    document.getElementById('messaggio').textContent =
+      'Storico pulito.';
+
+  } catch (error) {
+
+    mostraErrore(error);
+  }
+}
+
+
+function mostraErrore(error) {
+
+  document.getElementById('messaggio').textContent =
+    'Errore: ' + error.message;
+}
+
+
+document
+  .getElementById('prodotto')
+  .addEventListener(
+    'keydown',
+    function(event) {
+
+      if (event.key === 'Enter') {
+        aggiungi();
+      }
+    }
+  );
+
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js');
+}
+
+
+caricaLista();
+
 </script>
-
-<style>
-  html,
-  body {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-  }
-
-  iframe {
-    width: 100%;
-    height: 100%;
-    border: 0;
-  }
-</style>
 
 </body>
 </html>
