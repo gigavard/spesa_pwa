@@ -9,20 +9,35 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - name: Check GitHub Pages frontend
+      - name: Check deployed frontend
         run: |
           set -euo pipefail
-          html=$(curl -fsSL https://gigavard.github.io/spesa_pwa/)
-          echo "$html" | grep -q '<title>Spesa</title>'
-          echo "$html" | grep -q 'AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6'
+          ok=0
+          for i in $(seq 1 20); do
+            html=$(curl -fsSL "https://gigavard.github.io/spesa_pwa/?smoke=${GITHUB_SHA}" || true)
+            if echo "$html" | grep -q '<title>Spesa</title>' \
+              && echo "$html" | grep -q 'attendiStato' \
+              && ! echo "$html" | grep -q 'item.riga'; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ok" -eq 1
 
       - name: Check Apps Script read endpoint via JSONP
         run: |
           set -euo pipefail
-          body=$(curl -fsSL 'https://script.google.com/macros/s/AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6/exec?action=lista&callback=smoke')
-          echo "$body"
-          echo "$body" | grep -q '^smoke('
-          echo "$body" | grep -q '"ok":true'
+          ok=0
+          for i in $(seq 1 20); do
+            body=$(curl -fsSL "https://script.google.com/macros/s/AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6/exec?action=lista&callback=smoke&_=${i}" || true)
+            if echo "$body" | grep -q '^smoke(' && echo "$body" | grep -q '"ok":true'; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ok" -eq 1
 
       - name: Check Apps Script POST route without changing data
         run: |
@@ -31,6 +46,5 @@ jobs:
             -H 'Content-Type: text/plain;charset=utf-8' \
             --data '{"action":"__smoke__"}' \
             'https://script.google.com/macros/s/AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6/exec')
-          echo "$body"
           echo "$body" | grep -q '"ok":false'
           echo "$body" | grep -q 'Azione POST non riconosciuta'
