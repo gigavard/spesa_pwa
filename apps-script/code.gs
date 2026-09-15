@@ -1,22 +1,12 @@
 const NOME_LISTA = 'Lista Spesa';
 const NOME_STORICO = 'Storico';
 
-/*
- * WEB APP / API
- *
- * Letture: GET + JSONP, così il frontend GitHub Pages non dipende dal CORS.
- * Scritture: POST, così non modifichiamo dati tramite GET.
- */
 function doGet(e) {
   const p = e && e.parameter ? e.parameter : {};
   const action = p.action || '';
 
-  // L'Apps Script è ormai solo il backend della PWA GitHub Pages.
   if (!action) {
-    return apiResponse({
-      ok: true,
-      service: 'Spesa API'
-    });
+    return apiResponse({ ok: true, service: 'Spesa API' });
   }
 
   try {
@@ -24,31 +14,21 @@ function doGet(e) {
 
     switch (action) {
       case 'lista':
-        risposta = {
-          ok: true,
-          lista: getListaSpesa()
-        };
+        risposta = { ok: true, lista: getListaSpesa() };
         break;
-
       default:
-        risposta = {
-          ok: false,
-          messaggio: 'Azione GET non riconosciuta.'
-        };
+        risposta = { ok: false, messaggio: 'Azione GET non riconosciuta.' };
     }
 
     return apiResponse(risposta, p.callback);
   } catch (error) {
-    return apiResponse({
-      ok: false,
-      messaggio: error.message
-    }, p.callback);
+    return apiResponse({ ok: false, messaggio: error.message }, p.callback);
   }
 }
 
 function doPost(e) {
   try {
-    const dati = JSON.parse(e.postData.contents || '{}');
+    const dati = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     const action = dati.action;
     let risposta;
 
@@ -56,44 +36,32 @@ function doPost(e) {
       case 'aggiungi':
         risposta = aggiungiProdotto(dati.testo, dati.utente);
         break;
-
       case 'aumenta':
-        aumentaQuantita(validaRiga(dati.riga));
+        aumentaQuantitaProdotto(dati.prodotto);
         risposta = { ok: true };
         break;
-
       case 'diminuisci':
-        diminuisciQuantita(validaRiga(dati.riga));
+        diminuisciQuantitaProdotto(dati.prodotto);
         risposta = { ok: true };
         break;
-
       case 'rimuovi':
-        rimuoviProdotto(validaRiga(dati.riga));
+        rimuoviProdotto(dati.prodotto);
         risposta = { ok: true };
         break;
-
       case 'chiudi':
         risposta = chiudiSpesa();
         break;
-
       case 'pulisciStorico':
         pulisciStorico();
         risposta = { ok: true };
         break;
-
       default:
-        risposta = {
-          ok: false,
-          messaggio: 'Azione POST non riconosciuta.'
-        };
+        risposta = { ok: false, messaggio: 'Azione POST non riconosciuta.' };
     }
 
     return apiResponse(risposta);
   } catch (error) {
-    return apiResponse({
-      ok: false,
-      messaggio: error.message
-    });
+    return apiResponse({ ok: false, messaggio: error.message });
   }
 }
 
@@ -117,15 +85,6 @@ function apiResponse(dati, callback) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function validaRiga(valore) {
-  const riga = Number(valore);
-  if (!Number.isInteger(riga) || riga < 2) {
-    throw new Error('Riga non valida.');
-  }
-  return riga;
-}
-
-/* LISTA SPESA */
 function getListaSpesa() {
   const sheet = getFoglio();
   const lastRow = sheet.getLastRow();
@@ -141,8 +100,7 @@ function getListaSpesa() {
 
     if (prodotto && stato === 'Da comprare') {
       lista.push({
-        riga: i + 2,
-        prodotto: prodotto,
+        prodotto: String(prodotto),
         quantita: quantita
       });
     }
@@ -152,131 +110,184 @@ function getListaSpesa() {
 }
 
 function aggiungiProdotto(testo, aggiuntoDa) {
-  const sheet = getFoglio();
-  const input = String(testo || '').trim();
+  return conLock(function() {
+    const sheet = getFoglio();
+    const input = String(testo || '').trim();
 
-  if (!input) {
-    return { ok: false, messaggio: 'Scrivi un prodotto.' };
-  }
+    if (!input) {
+      return { ok: false, messaggio: 'Scrivi un prodotto.' };
+    }
 
-  const parsed = parseInput(input);
-  const lastRow = sheet.getLastRow();
-  const valori = lastRow >= 2
-    ? sheet.getRange(2, 1, lastRow - 1, 5).getValues()
-    : [];
-  const target = normalizza(parsed.prodotto);
+    const parsed = parseInput(input);
+    const esistente = trovaProdotto(sheet, parsed.prodotto);
 
-  for (let i = 0; i < valori.length; i++) {
-    const prodotto = valori[i][0];
-    const quantita = Number(valori[i][1]) || 1;
-    const stato = valori[i][4];
-
-    if (normalizza(prodotto) === target && stato === 'Da comprare') {
+    if (esistente) {
       return {
         ok: false,
         esistente: true,
-        prodotto: prodotto,
-        quantita: quantita,
-        messaggio: `${prodotto} è già presente in quantità ${quantita}.`
+        prodotto: esistente.prodotto,
+        quantita: esistente.quantita,
+        messaggio: `${esistente.prodotto} è già presente in quantità ${esistente.quantita}.`
+      };
+    }
+
+    const oggi = Utilities.formatDate(new Date(), 'Europe/Rome', 'dd/MM/yyyy');
+    sheet.appendRow([
+      parsed.prodotto,
+      parsed.quantita,
+      oggi,
+      aggiuntoDa || '',
+      'Da comprare'
+    ]);
+
+    return {
+      ok: true,
+      prodotto: parsed.prodotto,
+      quantita: parsed.quantita,
+      messaggio: `${parsed.prodotto} aggiunto, quantità ${parsed.quantita}.`
+    };
+  });
+}
+
+function aumentaQuantitaProdotto(prodotto) {
+  return conLock(function() {
+    const sheet = getFoglio();
+    const item = trovaProdottoObbligatorio(sheet, prodotto);
+    sheet.getRange(item.riga, 2).setValue(item.quantita + 1);
+    SpreadsheetApp.flush();
+    return true;
+  });
+}
+
+function diminuisciQuantitaProdotto(prodotto) {
+  return conLock(function() {
+    const sheet = getFoglio();
+    const item = trovaProdottoObbligatorio(sheet, prodotto);
+
+    if (item.quantita > 1) {
+      sheet.getRange(item.riga, 2).setValue(item.quantita - 1);
+    } else {
+      sheet.deleteRow(item.riga);
+    }
+
+    SpreadsheetApp.flush();
+    return true;
+  });
+}
+
+function rimuoviProdotto(prodotto) {
+  return conLock(function() {
+    const sheet = getFoglio();
+    const item = trovaProdottoObbligatorio(sheet, prodotto);
+    sheet.deleteRow(item.riga);
+    SpreadsheetApp.flush();
+    return true;
+  });
+}
+
+function trovaProdotto(sheet, prodottoCercato) {
+  const target = normalizza(prodottoCercato);
+  if (!target) return null;
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  const valori = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+
+  for (let i = 0; i < valori.length; i++) {
+    const prodotto = valori[i][0];
+    const stato = valori[i][4];
+
+    if (prodotto && stato === 'Da comprare' && normalizza(prodotto) === target) {
+      return {
+        riga: i + 2,
+        prodotto: String(prodotto),
+        quantita: Number(valori[i][1]) || 1
       };
     }
   }
 
-  const oggi = Utilities.formatDate(new Date(), 'Europe/Rome', 'dd/MM/yyyy');
-  sheet.appendRow([
-    parsed.prodotto,
-    parsed.quantita,
-    oggi,
-    aggiuntoDa || '',
-    'Da comprare'
-  ]);
-
-  return {
-    ok: true,
-    messaggio: `${parsed.prodotto} aggiunto, quantità ${parsed.quantita}.`
-  };
+  return null;
 }
 
-function aumentaQuantita(riga) {
-  const sheet = getFoglio();
-  const cella = sheet.getRange(riga, 2);
-  const quantita = Number(cella.getValue()) || 1;
-  cella.setValue(quantita + 1);
-  return true;
-}
-
-function diminuisciQuantita(riga) {
-  const sheet = getFoglio();
-  const cella = sheet.getRange(riga, 2);
-  const quantita = Number(cella.getValue()) || 1;
-
-  if (quantita > 1) {
-    cella.setValue(quantita - 1);
-  } else {
-    sheet.deleteRow(riga);
+function trovaProdottoObbligatorio(sheet, prodotto) {
+  const item = trovaProdotto(sheet, prodotto);
+  if (!item) {
+    throw new Error(`Prodotto non trovato: ${prodotto || ''}`);
   }
-  return true;
+  return item;
 }
 
-function rimuoviProdotto(riga) {
-  getFoglio().deleteRow(riga);
-  return true;
+function conLock(fn) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
 }
 
-/* CHIUSURA SPESA */
 function chiudiSpesa() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const lista = ss.getSheetByName(NOME_LISTA);
-  const storico = ss.getSheetByName(NOME_STORICO);
+  return conLock(function() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const lista = ss.getSheetByName(NOME_LISTA);
+    const storico = ss.getSheetByName(NOME_STORICO);
 
-  if (!lista || !storico) {
-    throw new Error('Foglio Lista Spesa o Storico non trovato');
-  }
+    if (!lista || !storico) {
+      throw new Error('Foglio Lista Spesa o Storico non trovato');
+    }
 
-  const lastRow = lista.getLastRow();
-  if (lastRow < 2) {
-    return { ok: false, messaggio: 'La lista è già vuota.' };
-  }
+    const lastRow = lista.getLastRow();
+    if (lastRow < 2) {
+      return { ok: false, messaggio: 'La lista è già vuota.' };
+    }
 
-  const valori = lista.getRange(2, 1, lastRow - 1, 5).getValues();
-  const oggi = Utilities.formatDate(new Date(), 'Europe/Rome', 'dd/MM/yyyy');
-  const righeStorico = [];
+    const valori = lista.getRange(2, 1, lastRow - 1, 5).getValues();
+    const oggi = Utilities.formatDate(new Date(), 'Europe/Rome', 'dd/MM/yyyy');
+    const righeStorico = [];
 
-  valori.forEach(function(riga) {
-    const prodotto = riga[0];
-    const quantita = Number(riga[1]) || 1;
-    if (prodotto) righeStorico.push([prodotto, quantita, oggi]);
+    valori.forEach(function(riga) {
+      const prodotto = riga[0];
+      const quantita = Number(riga[1]) || 1;
+      const stato = riga[4];
+      if (prodotto && stato === 'Da comprare') {
+        righeStorico.push([prodotto, quantita, oggi]);
+      }
+    });
+
+    if (righeStorico.length > 0) {
+      storico
+        .getRange(storico.getLastRow() + 1, 1, righeStorico.length, 3)
+        .setValues(righeStorico);
+    }
+
+    lista.getRange(2, 1, lastRow - 1, 5).clearContent();
+    SpreadsheetApp.flush();
+
+    return {
+      ok: true,
+      messaggio: `Spesa chiusa: ${righeStorico.length} prodotti salvati nello storico.`
+    };
   });
-
-  if (righeStorico.length > 0) {
-    storico
-      .getRange(storico.getLastRow() + 1, 1, righeStorico.length, 3)
-      .setValues(righeStorico);
-  }
-
-  lista.getRange(2, 1, lastRow - 1, 5).clearContent();
-
-  return {
-    ok: true,
-    messaggio: `Spesa chiusa: ${righeStorico.length} prodotti salvati nello storico.`
-  };
 }
 
-/* STORICO */
 function pulisciStorico() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const storico = ss.getSheetByName(NOME_STORICO);
+  return conLock(function() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const storico = ss.getSheetByName(NOME_STORICO);
 
-  if (!storico) throw new Error('Foglio Storico non trovato');
+    if (!storico) throw new Error('Foglio Storico non trovato');
 
-  const lastRow = storico.getLastRow();
-  if (lastRow >= 2) {
-    storico.getRange(2, 1, lastRow - 1, 3).clearContent();
-  }
-  return true;
+    const lastRow = storico.getLastRow();
+    if (lastRow >= 2) {
+      storico.getRange(2, 1, lastRow - 1, 3).clearContent();
+      SpreadsheetApp.flush();
+    }
+    return true;
+  });
 }
 
-/* UTILITÀ */
 function getFoglio() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(NOME_LISTA);
@@ -285,7 +296,7 @@ function getFoglio() {
 }
 
 function parseInput(input) {
-  let testo = input.trim();
+  const testo = input.trim();
   let quantita = 1;
   let prodotto = testo;
   const match = testo.match(/^(\d+)\s+(.+)$/);
