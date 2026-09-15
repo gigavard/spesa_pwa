@@ -69,10 +69,9 @@ let callbackCounter = 0;
 let utenteCorrente = localStorage.getItem('utenteSpesa');
 let listaCorrente = [];
 let operazioneInCorso = false;
+let reconcileToken = 0;
 
-if (!utenteCorrente) {
-  document.getElementById('sceltaUtente').style.display = 'block';
-}
+if (!utenteCorrente) document.getElementById('sceltaUtente').style.display = 'block';
 aggiornaUtenteUI();
 
 function impostaUtente(nome) {
@@ -102,13 +101,23 @@ function setBusy(busy) {
   document.querySelectorAll('.azione').forEach(btn => btn.disabled = busy);
 }
 
+function conTimeout(promise, ms, messaggio) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(messaggio)), ms))
+  ]);
+}
+
 function jsonp(params) {
   return new Promise((resolve, reject) => {
     const callbackName = '__spesaJsonp' + Date.now() + '_' + (++callbackCounter);
     const script = document.createElement('script');
-    const timeout = setTimeout(() => cleanup(new Error('Timeout nella lettura del backend.')), 10000);
+    let chiusa = false;
+    const timeout = setTimeout(() => cleanup(new Error('Timeout nella lettura del backend.')), 5000);
 
     function cleanup(error, data) {
+      if (chiusa) return;
+      chiusa = true;
       clearTimeout(timeout);
       if (script.parentNode) script.parentNode.removeChild(script);
       try { delete window[callbackName]; } catch (_) { window[callbackName] = undefined; }
@@ -118,12 +127,7 @@ function jsonp(params) {
     window[callbackName] = data => cleanup(null, data);
     script.onerror = () => cleanup(new Error('Impossibile leggere il backend.'));
 
-    const query = new URLSearchParams({
-      ...params,
-      callback: callbackName,
-      _: String(Date.now())
-    });
-
+    const query = new URLSearchParams({ ...params, callback: callbackName, _: String(Date.now()) });
     script.src = API + '?' + query.toString();
     document.head.appendChild(script);
   });
@@ -191,62 +195,78 @@ function mostraLista(lista) {
 }
 
 async function postSenzaCors(dati) {
-  await fetch(API, {
+  return conTimeout(fetch(API, {
     method: 'POST',
     mode: 'no-cors',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(dati)
-  });
+  }), 5000, 'Timeout durante la scrittura.');
 }
 
-async function attendiStato(predicate, descrizione) {
-  const tentativi = 15;
-
-  for (let i = 0; i < tentativi; i++) {
-    const lista = await leggiLista();
-    listaCorrente = lista;
-
-    if (predicate(lista)) {
-      mostraLista(lista);
-      return lista;
-    }
-
-    await attesa(300);
-  }
-
-  listaCorrente = await leggiLista();
-  mostraLista(listaCorrente);
-  throw new Error('Il foglio è stato aggiornato, ma il frontend non ha confermato in tempo: ' + descrizione + '.');
+function trovaIndice(lista, prodotto) {
+  const key = normalizzaClient(prodotto);
+  return lista.findIndex(item => normalizzaClient(item.prodotto) === key);
 }
 
 function trovaInLista(lista, prodotto) {
-  const key = normalizzaClient(prodotto);
-  return lista.find(item => normalizzaClient(item.prodotto) === key);
+  const idx = trovaIndice(lista, prodotto);
+  return idx >= 0 ? lista[idx] : undefined;
+}
+
+function aggiornaQuantitaLocale(prodotto, delta) {
+  const idx = trovaIndice(listaCorrente, prodotto);
+  if (idx < 0) return;
+  const corrente = Number(listaCorrente[idx].quantita) || 1;
+  if (delta < 0 && corrente <= 1) listaCorrente.splice(idx, 1);
+  else listaCorrente[idx] = { ...listaCorrente[idx], quantita: corrente + delta };
+  mostraLista(listaCorrente);
+}
+
+function rimuoviLocale(prodotto) {
+  const idx = trovaIndice(listaCorrente, prodotto);
+  if (idx >= 0) listaCorrente.splice(idx, 1);
+  mostraLista(listaCorrente);
+}
+
+function aggiungiLocale(prodotto, quantita) {
+  listaCorrente.push({ prodotto, quantita });
+  mostraLista(listaCorrente);
+}
+
+async function riconciliaInBackground() {
+  const mioToken = ++reconcileToken;
+  for (let i = 0; i < 5; i++) {
+    try {
+      const lista = await leggiLista();
+      if (mioToken !== reconcileToken) return;
+      listaCorrente = lista;
+      mostraLista(listaCorrente);
+      return;
+    } catch (_) {
+      await attesa(700);
+    }
+  }
+  if (mioToken === reconcileToken) {
+    document.getElementById('messaggio').textContent = 'Dati salvati, ma non riesco a verificare subito il foglio. Riproverò al prossimo aggiornamento.';
+  }
 }
 
 async function cambiaQuantita(item, delta) {
   if (operazioneInCorso) return;
-
-  const quantitaPrima = item.quantita;
   const action = delta > 0 ? 'aumenta' : 'diminuisci';
 
   setBusy(true);
   document.getElementById('messaggio').textContent = '';
+  aggiornaQuantitaLocale(item.prodotto, delta);
 
   try {
     await postSenzaCors({ action, prodotto: item.prodotto });
-
-    await attendiStato(lista => {
-      const aggiornato = trovaInLista(lista, item.prodotto);
-      if (delta > 0) return !!aggiornato && aggiornato.quantita === quantitaPrima + 1;
-      if (quantitaPrima > 1) return !!aggiornato && aggiornato.quantita === quantitaPrima - 1;
-      return !aggiornato;
-    }, action + ' ' + item.prodotto);
   } catch (error) {
     mostraErrore(error);
   } finally {
     setBusy(false);
     mostraLista(listaCorrente);
+    riconciliaInBackground();
   }
 }
 
@@ -255,18 +275,16 @@ async function rimuovi(item) {
 
   setBusy(true);
   document.getElementById('messaggio').textContent = '';
+  rimuoviLocale(item.prodotto);
 
   try {
     await postSenzaCors({ action: 'rimuovi', prodotto: item.prodotto });
-    await attendiStato(
-      lista => !trovaInLista(lista, item.prodotto),
-      'rimozione ' + item.prodotto
-    );
   } catch (error) {
     mostraErrore(error);
   } finally {
     setBusy(false);
     mostraLista(listaCorrente);
+    riconciliaInBackground();
   }
 }
 
@@ -285,31 +303,25 @@ async function aggiungi() {
 
   const parsed = parseInputClient(testo);
   const giaPresente = trovaInLista(listaCorrente, parsed.prodotto);
-
   if (giaPresente) {
     messaggio.textContent = `${giaPresente.prodotto} è già presente in quantità ${giaPresente.quantita}.`;
     return;
   }
 
   setBusy(true);
-  messaggio.textContent = 'Aggiungo...';
+  aggiungiLocale(parsed.prodotto, parsed.quantita);
+  input.value = '';
+  messaggio.textContent = `${parsed.prodotto} aggiunto.`;
 
   try {
     await postSenzaCors({ action: 'aggiungi', testo, utente: utenteCorrente });
-
-    await attendiStato(lista => {
-      const aggiunto = trovaInLista(lista, parsed.prodotto);
-      return !!aggiunto && aggiunto.quantita === parsed.quantita;
-    }, 'aggiunta ' + parsed.prodotto);
-
-    input.value = '';
-    messaggio.textContent = `${parsed.prodotto} aggiunto.`;
   } catch (error) {
     mostraErrore(error);
   } finally {
     setBusy(false);
     mostraLista(listaCorrente);
     if (!input.disabled) input.focus();
+    riconciliaInBackground();
   }
 }
 
@@ -322,17 +334,20 @@ async function chiudiSpesa() {
   if (!confirm('Confermi che la spesa è fatta? La lista verrà salvata nello storico e poi svuotata.')) return;
 
   setBusy(true);
-  document.getElementById('messaggio').textContent = 'Salvo la spesa...';
+  const backup = listaCorrente.slice();
+  listaCorrente = [];
+  mostraLista(listaCorrente);
+  document.getElementById('messaggio').textContent = 'Spesa salvata nello storico.';
 
   try {
     await postSenzaCors({ action: 'chiudi' });
-    await attendiStato(lista => lista.length === 0, 'chiusura spesa');
-    document.getElementById('messaggio').textContent = 'Spesa salvata nello storico.';
   } catch (error) {
+    listaCorrente = backup;
     mostraErrore(error);
   } finally {
     setBusy(false);
     mostraLista(listaCorrente);
+    riconciliaInBackground();
   }
 }
 
@@ -342,10 +357,8 @@ async function confermaPulisciStorico() {
 
   setBusy(true);
   document.getElementById('messaggio').textContent = 'Pulisco lo storico...';
-
   try {
     await postSenzaCors({ action: 'pulisciStorico' });
-    await attesa(600);
     document.getElementById('messaggio').textContent = 'Storico pulito.';
   } catch (error) {
     mostraErrore(error);
@@ -360,23 +373,17 @@ function parseInputClient(input) {
   const match = testo.match(/^(\d+)\s+(.+)$/);
   let quantita = 1;
   let prodotto = testo;
-
   if (match) {
     quantita = parseInt(match[1], 10);
     prodotto = match[2];
   }
-
   prodotto = prodotto.trim().replace(/\s+/g, ' ');
   prodotto = prodotto.charAt(0).toUpperCase() + prodotto.slice(1);
   return { prodotto, quantita };
 }
 
 function normalizzaClient(testo) {
-  return String(testo || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+  return String(testo || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 function attesa(ms) {
@@ -391,9 +398,7 @@ document.getElementById('prodotto').addEventListener('keydown', event => {
   if (event.key === 'Enter') aggiungi();
 });
 
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js');
-}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
 
 caricaLista().catch(() => {});
 </script>
