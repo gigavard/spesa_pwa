@@ -207,6 +207,111 @@ test('REQ-VOICE-001: unsupported browser keeps manual input and hides microphone
   await expect(page.locator('#btnAggiungi')).toBeEnabled();
 });
 
+test('REQ-IMPORT-001: pasted notes are parsed per line and edits invalidate the preview', async ({ page }) => {
+  const posts = [];
+  await page.route('https://script.google.com/**', async route => {
+    const request = route.request();
+    if (request.method() === 'POST') {
+      posts.push(JSON.parse(request.postData() || '{}'));
+      return route.fulfill({ status: 200, body: '' });
+    }
+    const callback = new URL(request.url()).searchParams.get('callback');
+    return route.fulfill({
+      contentType: 'application/javascript',
+      body: `${callback}(${JSON.stringify({ ok: true, lista: [] })});`
+    });
+  });
+
+  await page.goto('/');
+  expect(await page.evaluate(() => parseTestoImportazioneClient([
+    '2 banane', 'due banane', 'banane due', 'ventotto uova', 'yogurt ventitré'
+  ].join('\n')))).toEqual([
+    { prodotto: 'Banane', quantita: 2 },
+    { prodotto: 'Banane', quantita: 2 },
+    { prodotto: 'Banane', quantita: 2 },
+    { prodotto: 'Uova', quantita: 28 },
+    { prodotto: 'Yogurt', quantita: 23 }
+  ]);
+  await page.locator('#btnApriImport').click();
+  await page.locator('#testoImport').fill([
+    '2 banane morbide',
+    'detersivo per piatti',
+    'scottex',
+    'fagioli scatola tre'
+  ].join('\n'));
+  await page.locator('#btnAnalizzaImport').click();
+
+  await expect(page.locator('.riga-import strong')).toHaveText([
+    '2 × Banane morbide',
+    '1 × Detersivo per piatti',
+    '1 × Scottex',
+    '3 × Fagioli scatola'
+  ]);
+  await expect(page.locator('#riepilogoImport')).toHaveText('4 nuovi, 0 già presenti, 0 duplicati nella nota.');
+  await expect(page.locator('#btnConfermaImport')).toBeVisible();
+  expect(posts).toHaveLength(0);
+
+  await page.locator('#testoImport').fill('2 banane morbide\nlatte');
+  await expect(page.locator('#btnConfermaImport')).toBeHidden();
+  await expect(page.locator('.riga-import')).toHaveCount(0);
+  expect(posts).toHaveLength(0);
+});
+
+test('REQ-IMPORT-001: confirmation sends one bulk request and keeps maximum quantities', async ({ page }) => {
+  let lista = [{ prodotto: 'Banane', quantita: 4 }];
+  const posts = [];
+  await page.route('https://script.google.com/**', async route => {
+    const request = route.request();
+    if (request.method() === 'GET') {
+      const callback = new URL(request.url()).searchParams.get('callback');
+      return route.fulfill({
+        contentType: 'application/javascript',
+        body: `${callback}(${JSON.stringify({ ok: true, lista })});`
+      });
+    }
+    const data = JSON.parse(request.postData() || '{}');
+    posts.push(data);
+    if (data.action === 'importa') {
+      lista = [
+        { prodotto: 'Banane', quantita: 5 },
+        { prodotto: 'Mele', quantita: 5 }
+      ];
+    }
+    return route.fulfill({ status: 200, body: '' });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Alice', exact: true }).click();
+  await page.locator('#btnApriImport').click();
+  const pasted = [
+    '2 banane',
+    'due banane',
+    'banane cinque',
+    'mele tre',
+    'cinque mele'
+  ].join('\n');
+  await page.locator('#testoImport').fill(pasted);
+  await page.locator('#btnAnalizzaImport').click();
+
+  await expect(page.locator('#riepilogoImport')).toHaveText('1 nuovi, 1 già presenti, 3 duplicati nella nota.');
+  await expect(page.locator('.riga-import small')).toHaveText([
+    'Già presente: quantità da 4 a 5.',
+    'Duplicato nella nota: verrà usata la quantità 5.',
+    'Duplicato nella nota: verrà usata la quantità 5.',
+    'Nuovo prodotto: quantità 5.',
+    'Duplicato nella nota: verrà usata la quantità 5.'
+  ]);
+  expect(posts).toHaveLength(0);
+
+  await page.locator('#btnConfermaImport').click();
+  await expect(page.locator('#pannelloImport')).toBeHidden();
+  await expect(page.locator('.nome-prodotto')).toHaveText(['Banane', 'Mele']);
+  await expect(page.locator('.quantita')).toHaveText(['5', '5']);
+  expect(posts).toHaveLength(1);
+  expect(posts[0]).toEqual({ action: 'importa', testo: pasted, utente: 'Alice' });
+  await expect(page.locator('#btnApriImport')).toBeEnabled();
+});
+
 test('REQ-SYNC-001: stale reconciliation cannot overwrite a newer optimistic mutation', async ({ page }) => {
   let lista = [{ prodotto: 'Latte', quantita: 2 }];
   let reads = 0;

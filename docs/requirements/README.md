@@ -10,6 +10,7 @@ I requisiti seguono le convenzioni definite in [Processo di sviluppo](../PROCESS
 | `REQ-LIFE-001` | Chiusura completa della spesa | Verificato | [`SPEC-LIFE-001`](../specifications/SPEC-LIFE-001.md) | [`PLAN-LIFE-001`](../plans/PLAN-LIFE-001.md) |
 | `REQ-PWA-001` | Installazione Android | Implementato | [`SPEC-PWA-001`](../specifications/SPEC-PWA-001.md) | [`PLAN-PWA-001`](../plans/PLAN-PWA-001.md) |
 | `REQ-VOICE-001` | Compilazione vocale del prodotto | Verificato | [`SPEC-VOICE-001`](../specifications/SPEC-VOICE-001.md) | [`PLAN-VOICE-001`](../plans/PLAN-VOICE-001.md) |
+| `REQ-IMPORT-001` | Importazione di una lista da note | Implementato | [`SPEC-IMPORT-001`](../specifications/SPEC-IMPORT-001.md) | [`PLAN-IMPORT-001`](../plans/PLAN-IMPORT-001.md) |
 
 I requisiti per installazione Android, input vocale e suggerimenti verranno aggiunti dopo aver chiarito con il product owner le rispettive scelte funzionali. La roadmap registra gli obiettivi, ma non equivale a requisiti approvati.
 

@@ -36,6 +36,9 @@ function doPost(e) {
       case 'aggiungi':
         risposta = aggiungiProdotto(dati.testo, dati.utente);
         break;
+      case 'importa':
+        risposta = importaProdotti(dati.testo, dati.utente);
+        break;
       case 'aumenta':
         aumentaQuantitaProdotto(dati.prodotto);
         risposta = { ok: true };
@@ -144,6 +147,70 @@ function aggiungiProdotto(testo, aggiuntoDa) {
       messaggio: `${parsed.prodotto} aggiunto, quantità ${parsed.quantita}.`
     };
   });
+}
+
+function importaProdotti(testo, aggiuntoDa) {
+  return conLock(function() {
+    const elementi = raggruppaImportazione(parseTestoImportazione(testo));
+    if (elementi.length === 0) {
+      return { ok: false, messaggio: 'Incolla almeno un prodotto.' };
+    }
+
+    const sheet = getFoglio();
+    const lastRow = sheet.getLastRow();
+    const valori = lastRow >= 2
+      ? sheet.getRange(2, 1, lastRow - 1, 4).getValues()
+      : [];
+    const esistenti = Object.create(null);
+
+    valori.forEach(function(riga, indice) {
+      if (!riga[0]) return;
+      esistenti[normalizza(riga[0])] = {
+        riga: indice + 2,
+        quantita: Number(riga[1]) || 1
+      };
+    });
+
+    const oggi = Utilities.formatDate(new Date(), 'Europe/Rome', 'dd/MM/yyyy');
+    const nuoveRighe = [];
+    let aggiornati = 0;
+    let giaPresenti = 0;
+
+    elementi.forEach(function(elemento) {
+      const esistente = esistenti[elemento.chiave];
+      if (!esistente) {
+        nuoveRighe.push([elemento.prodotto, elemento.quantita, oggi, aggiuntoDa || '']);
+        return;
+      }
+
+      giaPresenti++;
+      if (elemento.quantita > esistente.quantita) {
+        sheet.getRange(esistente.riga, 2).setValue(elemento.quantita);
+        aggiornati++;
+      }
+    });
+
+    if (nuoveRighe.length > 0) {
+      sheet
+        .getRange(sheet.getLastRow() + 1, 1, nuoveRighe.length, 4)
+        .setValues(nuoveRighe);
+    }
+
+    if (nuoveRighe.length > 0 || aggiornati > 0) SpreadsheetApp.flush();
+
+    return {
+      ok: true,
+      aggiunti: nuoveRighe.length,
+      aggiornati: aggiornati,
+      giaPresenti: giaPresenti,
+      messaggio: creaMessaggioImportazione(nuoveRighe.length, aggiornati, giaPresenti)
+    };
+  });
+}
+
+function creaMessaggioImportazione(aggiunti, aggiornati, giaPresenti) {
+  return aggiunti + ' aggiunti, ' + aggiornati + ' aggiornati, ' +
+    giaPresenti + ' già presenti.';
 }
 
 function aumentaQuantitaProdotto(prodotto) {
@@ -331,6 +398,94 @@ function parseInput(input) {
   prodotto = prodotto.charAt(0).toUpperCase() + prodotto.slice(1);
 
   return { prodotto, quantita };
+}
+
+function parseTestoImportazione(testo) {
+  return String(testo || '')
+    .split(/\r?\n/)
+    .map(parseRigaImportazione)
+    .filter(function(elemento) { return elemento !== null; });
+}
+
+function parseRigaImportazione(riga) {
+  const testo = String(riga || '').trim().replace(/\s+/g, ' ');
+  if (!testo) return null;
+
+  const parti = testo.split(' ');
+  let quantita = parseQuantitaItaliana(parti[0]);
+  let indiceQuantita = quantita !== null && parti.length > 1 ? 0 : -1;
+
+  if (indiceQuantita < 0) {
+    quantita = parseQuantitaItaliana(parti[parti.length - 1]);
+    indiceQuantita = quantita !== null && parti.length > 1 ? parti.length - 1 : -1;
+  }
+
+  if (indiceQuantita < 0) quantita = 1;
+  else parti.splice(indiceQuantita, 1);
+
+  let prodotto = parti.join(' ').trim().replace(/\s+/g, ' ');
+  prodotto = prodotto.charAt(0).toUpperCase() + prodotto.slice(1);
+  return { prodotto: prodotto, quantita: quantita };
+}
+
+function parseQuantitaItaliana(valore) {
+  const token = normalizza(valore).replace(/[-'’]/g, '');
+  if (/^\d+$/.test(token)) {
+    const numero = parseInt(token, 10);
+    return numero > 0 ? numero : null;
+  }
+
+  const unita = {
+    un: 1, uno: 1, una: 1, due: 2, tre: 3, quattro: 4, cinque: 5,
+    sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10, undici: 11,
+    dodici: 12, tredici: 13, quattordici: 14, quindici: 15,
+    sedici: 16, diciassette: 17, diciotto: 18, diciannove: 19
+  };
+  if (Object.prototype.hasOwnProperty.call(unita, token)) return unita[token];
+
+  const decine = {
+    venti: 20, trenta: 30, quaranta: 40, cinquanta: 50,
+    sessanta: 60, settanta: 70, ottanta: 80, novanta: 90
+  };
+  if (Object.prototype.hasOwnProperty.call(decine, token)) return decine[token];
+
+  const cifre = { uno: 1, due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9 };
+  const nomiDecine = Object.keys(decine);
+  for (let i = 0; i < nomiDecine.length; i++) {
+    const nomeDecina = nomiDecine[i];
+    const valoreDecina = decine[nomeDecina];
+    const nomiCifre = Object.keys(cifre);
+    for (let j = 0; j < nomiCifre.length; j++) {
+      const nomeCifra = nomiCifre[j];
+      const radice = nomeCifra === 'uno' || nomeCifra === 'otto'
+        ? nomeDecina.slice(0, -1)
+        : nomeDecina;
+      if (token === radice + nomeCifra) return valoreDecina + cifre[nomeCifra];
+    }
+  }
+  return null;
+}
+
+function raggruppaImportazione(elementi) {
+  const gruppi = [];
+  const perChiave = Object.create(null);
+
+  elementi.forEach(function(elemento) {
+    const chiave = normalizza(elemento.prodotto);
+    if (!chiave) return;
+    if (!perChiave[chiave]) {
+      perChiave[chiave] = {
+        chiave: chiave,
+        prodotto: elemento.prodotto,
+        quantita: elemento.quantita
+      };
+      gruppi.push(perChiave[chiave]);
+      return;
+    }
+    perChiave[chiave].quantita = Math.max(perChiave[chiave].quantita, elemento.quantita);
+  });
+
+  return gruppi;
 }
 
 function normalizza(testo) {

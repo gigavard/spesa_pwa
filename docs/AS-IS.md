@@ -8,6 +8,7 @@ Spesa PWA permette a Giulio e Alice di condividere una lista della spesa salvata
 
 - scegliere chi sta usando l'app;
 - aggiungere un prodotto, anche con una quantità nel formato `4 banane`;
+- incollare e importare una nota con un prodotto per riga, dopo averne controllato l'anteprima;
 - aumentare, diminuire o eliminare un prodotto;
 - chiudere una spesa, copiando gli elementi nello storico e svuotando la lista;
 - cancellare lo storico dopo una conferma.
@@ -70,6 +71,7 @@ Con `callback` la risposta è JavaScript JSONP; senza callback è JSON.
 | Azione | Campi | Comportamento |
 |---|---|---|
 | `aggiungi` | `testo`, `utente` | interpreta quantità e prodotto, rifiuta duplicati normalizzati, aggiunge una riga |
+| `importa` | `testo`, `utente` | interpreta più righe, raggruppa i duplicati e inserisce o aumenta alle quantità massime sotto un solo lock |
 | `aumenta` | `prodotto` | incrementa di uno |
 | `diminuisci` | `prodotto` | decrementa di uno; a quantità 1 elimina la riga |
 | `rimuovi` | `prodotto` | elimina la riga |
@@ -111,6 +113,8 @@ La scelta fra Giulio e Alice è salvata in `localStorage` con la chiave `utenteS
 
 Client e server interpretano `4 banane` come quantità `4` e prodotto `Banane`. Se il testo non comincia con un intero positivo seguito da almeno uno spazio, la quantità è 1 e tutto il testo è il prodotto. Non sono gestite quantità decimali, unità di misura o frasi naturali più articolate.
 
+Il flusso `Importa note` usa un parser separato e identico su client e server. Ogni riga non vuota è un prodotto; una quantità in cifre o in lettere italiane da uno a novantanove può trovarsi all'inizio o alla fine. Il resto della riga resta nel nome. Le righe equivalenti vengono raggruppate conservando il primo nome e la quantità maggiore. Se il prodotto è già nel foglio, data, autore e nome restano invariati e può aumentare soltanto la quantità.
+
 I prodotti sono confrontati tramite nome:
 
 - rimozione degli spazi esterni;
@@ -124,6 +128,8 @@ Gli spazi interni vengono compattati durante il parsing dei nuovi prodotti. La n
 L'interfaccia è pensata per schermi stretti, con larghezza massima di 500 px e pulsanti touch. Il rendering dei nomi usa `textContent`, evitando che il testo di un prodotto venga interpretato come HTML.
 
 Nei browser che espongono `SpeechRecognition` o `webkitSpeechRecognition`, accanto al campo appare un pulsante microfono. Avvia una sessione singola in italiano e sostituisce il contenuto del campo con il risultato finale. La trascrizione resta modificabile e non aggiunge nulla finché l'utente non preme `Aggiungi`. In caso di browser non supportato o errore, l'inserimento manuale resta disponibile. La funzione è pubblicata e verificata sia automaticamente sia nell'app installata su Android.
+
+Il pulsante `Importa note` apre un pannello inline con textarea, analisi, anteprima riga per riga, riepilogo, annullamento e conferma. L'analisi non scrive dati. Ogni modifica al testo invalida l'anteprima; la conferma invia un solo POST bulk, aggiorna subito la lista locale e avvia la normale riconciliazione col foglio.
 
 Sono presenti le conferme richieste prima di:
 
@@ -165,8 +171,8 @@ Le credenziali non sono nel repository. Identificativi del progetto e del deploy
 | Livello | File/workflow | Copertura effettiva |
 |---|---|---|
 | sintassi | esecuzione locale con Node | JavaScript del frontend, service worker, test, server e backend Apps Script |
-| browser simulato | `tests/frontend.spec.js` | retry della prima lettura; installazione; voce; protezione da riconciliazioni obsolete; controlli nuovamente usabili |
-| browser con foglio reale | `tests/sheet.spec.js` | aggiunta, incremento, decremento, eliminazione e riconciliazione; prodotto univoco e pulizia mirata |
+| browser simulato | `tests/frontend.spec.js` | retry della prima lettura; installazione; voce; importazione con anteprima e POST bulk; protezione da riconciliazioni obsolete; controlli nuovamente usabili |
+| browser con foglio reale | `tests/sheet.spec.js` | CRUD e import bulk con quantità massima; dati univoci, riconciliazione e pulizia mirata |
 | smoke pubblicato | `.github/workflows/smoke.yml` | raggiungibilità frontend, GET JSONP e POST innocuo verso Apps Script |
 | CI frontend | `.github/workflows/frontend-e2e.yml` | checkout locale con backend simulato; test reale solo su avvio manuale esplicito |
 
@@ -174,12 +180,12 @@ Il progetto Playwright blocca il service worker nei test simulati. Il test con f
 
 Verifiche svolte sullo stato corrente:
 
-- test backend Apps Script isolati: 6 superati, inclusi schema a quattro colonne, chiusura completa e migrazione;
+- test backend Apps Script isolati: 8 superati, inclusi parsing import, quantità massime, schema a quattro colonne, chiusura completa e migrazione;
 - controllo sintattico JavaScript: superato;
-- test frontend correnti: 8 superati, inclusi 3 scenari vocali con motore simulato;
-- test CRUD con Google Sheet reale: 1 superato, con prodotto univoco e pulizia verificata;
+- test frontend correnti: 10 superati, inclusi 3 scenari vocali e 2 scenari di importazione;
+- test con Google Sheet reale: CRUD e import bulk superati, con prodotti univoci e pulizia verificata;
 - migrazione del foglio reale: completata, colonna `Stato` rimossa;
-- backend pubblicato: deployment versione 17 verificato in lettura;
+- backend pubblicato: deployment versione 19 verificato con importazione e rilettura;
 - chiusura completa sul foglio reale: non eseguita per non archiviare eventuali prodotti reali; coperta dal test backend isolato;
 - struttura installabile del sito pubblicato: verificata con manifest senza errori e service worker attivo;
 - esperienza sul launcher Android: non ancora verificata su dispositivo reale.
@@ -192,7 +198,7 @@ Verifiche svolte sullo stato corrente:
 4. **Esito POST non osservabile.** Errori applicativi sono scoperti soltanto dalla rilettura; un timeout non dimostra che la scrittura non sia avvenuta.
 5. **Storico troppo povero per analisi evolute.** Registra prodotto, quantità e giorno, ma non conserva autore, identificativo della sessione di spesa, orario o categorie.
 6. **Codice frontend monolitico.** Tutta l'app è in un solo HTML; è ancora gestibile, ma voce, installazione guidata e suggerimenti renderanno utile separare almeno logica, stile e UI.
-7. **Copertura incompleta.** I test frontend simulati non coprono aggiunta, duplicati, chiusura, pulizia, errori POST, selezione utente, parsing o installabilità; parte della logica backend corrispondente è coperta separatamente.
+7. **Copertura incompleta.** I test frontend simulati non coprono chiusura, pulizia, tutti gli errori POST e l'intero percorso di selezione utente; parte della logica backend corrispondente è coperta separatamente.
 
 ## Confini da preservare
 

@@ -32,6 +32,18 @@
     .scelta-bottoni { display: flex; gap: 12px; }
     .scelta-bottoni button { flex: 1; padding: 16px; font-size: 20px; }
     .install-button { width: 100%; margin: -8px 0 20px; padding: 12px; border: 1px solid #087f3f; border-radius: 10px; background: #e9f7ef; color: #075f31; font-size: 17px; font-weight: bold; }
+    .import-open { margin-top: 12px; }
+    .import-panel { margin-top: 14px; padding: 16px; border: 1px solid #ccc; border-radius: 12px; background: #fafafa; }
+    .import-panel label { display: block; margin-bottom: 8px; font-size: 18px; font-weight: bold; }
+    .import-panel textarea { width: 100%; min-height: 150px; padding: 12px; box-sizing: border-box; resize: vertical; font: inherit; font-size: 18px; }
+    .import-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .import-actions button { flex: 1; padding: 12px 8px; font-size: 17px; }
+    #riepilogoImport { margin-top: 14px; font-weight: bold; }
+    .anteprima-import { margin-top: 8px; }
+    .riga-import { padding: 9px 0; border-bottom: 1px solid #ddd; }
+    .riga-import strong, .riga-import small { display: block; }
+    .riga-import small { margin-top: 3px; color: #555; }
+    .import-confirm { margin-top: 14px; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -60,6 +72,20 @@
   </div>
 
   <div id="messaggio" aria-live="polite"></div>
+
+  <button id="btnApriImport" class="azione-secondaria import-open" type="button">📋 Importa note</button>
+  <section id="pannelloImport" class="import-panel" aria-labelledby="titoloImport" hidden>
+    <label id="titoloImport" for="testoImport">Incolla la lista, un prodotto per riga</label>
+    <textarea id="testoImport" placeholder="2 banane morbide&#10;detersivo per piatti&#10;fagioli scatola tre"></textarea>
+    <div class="import-actions">
+      <button id="btnAnalizzaImport" type="button">Analizza</button>
+      <button id="btnAnnullaImport" type="button">Annulla</button>
+    </div>
+    <div id="riepilogoImport" aria-live="polite"></div>
+    <div id="anteprimaImport" class="anteprima-import"></div>
+    <button id="btnConfermaImport" class="azione-principale import-confirm" type="button" hidden>Importa nella lista</button>
+  </section>
+
   <div id="lista"></div>
 
   <div style="margin-top:32px;">
@@ -82,6 +108,8 @@ let riconoscimentoVocale = null;
 let ascoltoVocale = false;
 let risultatoVocaleRicevuto = false;
 let erroreVocaleRicevuto = false;
+let testoImportAnalizzato = '';
+let elementiImportAnalizzati = [];
 
 if (!utenteCorrente) document.getElementById('sceltaUtente').style.display = 'block';
 aggiornaUtenteUI();
@@ -226,6 +254,11 @@ function setBusy(busy) {
   document.getElementById('btnAggiungi').disabled = busy;
   document.getElementById('btnChiudi').disabled = busy;
   document.getElementById('btnPulisci').disabled = busy;
+  document.getElementById('btnApriImport').disabled = busy;
+  document.getElementById('testoImport').disabled = busy;
+  document.getElementById('btnAnalizzaImport').disabled = busy;
+  document.getElementById('btnAnnullaImport').disabled = busy;
+  document.getElementById('btnConfermaImport').disabled = busy;
   document.querySelectorAll('.azione').forEach(btn => btn.disabled = busy);
   aggiornaPulsanteVoce();
 }
@@ -370,6 +403,18 @@ function aggiungiLocale(prodotto, quantita) {
   mostraLista(listaCorrente);
 }
 
+function applicaImportLocale(elementi) {
+  raggruppaImportazioneClient(elementi).forEach(elemento => {
+    const esistente = trovaInLista(listaCorrente, elemento.prodotto);
+    if (esistente) {
+      esistente.quantita = Math.max(Number(esistente.quantita) || 1, elemento.quantita);
+    } else {
+      listaCorrente.push({ prodotto: elemento.prodotto, quantita: elemento.quantita });
+    }
+  });
+  mostraLista(listaCorrente);
+}
+
 async function riconciliaInBackground() {
   const mioToken = ++reconcileToken;
   for (let i = 0; i < 5; i++) {
@@ -462,6 +507,122 @@ async function aggiungi() {
   }
 }
 
+function apriImportazione() {
+  if (operazioneInCorso) return;
+  document.getElementById('pannelloImport').hidden = false;
+  document.getElementById('testoImport').focus();
+}
+
+function annullaImportazione() {
+  if (operazioneInCorso) return;
+  document.getElementById('testoImport').value = '';
+  invalidaAnalisiImportazione();
+  document.getElementById('pannelloImport').hidden = true;
+}
+
+function invalidaAnalisiImportazione() {
+  testoImportAnalizzato = '';
+  elementiImportAnalizzati = [];
+  document.getElementById('riepilogoImport').textContent = '';
+  document.getElementById('anteprimaImport').replaceChildren();
+  document.getElementById('btnConfermaImport').hidden = true;
+}
+
+function analizzaImportazione() {
+  if (operazioneInCorso) return;
+  const testo = document.getElementById('testoImport').value;
+  const elementi = parseTestoImportazioneClient(testo);
+  if (elementi.length === 0) {
+    invalidaAnalisiImportazione();
+    document.getElementById('riepilogoImport').textContent = 'Incolla almeno un prodotto.';
+    return;
+  }
+
+  const gruppi = raggruppaImportazioneClient(elementi);
+  const gruppiPerChiave = new Map(gruppi.map(elemento => [elemento.chiave, elemento]));
+  const esistentiPerChiave = new Map(
+    listaCorrente.map(elemento => [normalizzaClient(elemento.prodotto), elemento])
+  );
+  const giaViste = new Set();
+  const anteprima = document.getElementById('anteprimaImport');
+  anteprima.replaceChildren();
+
+  elementi.forEach(elemento => {
+    const chiave = normalizzaClient(elemento.prodotto);
+    const gruppo = gruppiPerChiave.get(chiave);
+    const esistente = esistentiPerChiave.get(chiave);
+    let stato;
+
+    if (giaViste.has(chiave)) {
+      stato = `Duplicato nella nota: verrà usata la quantità ${gruppo.quantita}.`;
+    } else if (esistente && gruppo.quantita > (Number(esistente.quantita) || 1)) {
+      stato = `Già presente: quantità da ${esistente.quantita} a ${gruppo.quantita}.`;
+    } else if (esistente) {
+      stato = `Già presente: resta quantità ${esistente.quantita}.`;
+    } else {
+      stato = `Nuovo prodotto: quantità ${gruppo.quantita}.`;
+    }
+    giaViste.add(chiave);
+
+    const riga = document.createElement('div');
+    riga.className = 'riga-import';
+    const prodotto = document.createElement('strong');
+    prodotto.textContent = `${elemento.quantita} × ${elemento.prodotto}`;
+    const dettaglio = document.createElement('small');
+    dettaglio.textContent = stato;
+    riga.append(prodotto, dettaglio);
+    anteprima.appendChild(riga);
+  });
+
+  const giaPresenti = gruppi.filter(elemento => esistentiPerChiave.has(elemento.chiave)).length;
+  const nuovi = gruppi.length - giaPresenti;
+  const duplicati = elementi.length - gruppi.length;
+  document.getElementById('riepilogoImport').textContent =
+    `${nuovi} nuovi, ${giaPresenti} già presenti, ${duplicati} duplicati nella nota.`;
+  document.getElementById('btnConfermaImport').hidden = false;
+  testoImportAnalizzato = testo;
+  elementiImportAnalizzati = elementi;
+}
+
+async function confermaImportazione() {
+  if (operazioneInCorso || elementiImportAnalizzati.length === 0) return;
+  const testoAttuale = document.getElementById('testoImport').value;
+  if (testoAttuale !== testoImportAnalizzato) {
+    invalidaAnalisiImportazione();
+    document.getElementById('riepilogoImport').textContent = 'La lista è cambiata: analizzala di nuovo.';
+    return;
+  }
+  if (!utenteCorrente) {
+    document.getElementById('messaggio').textContent = 'Seleziona prima Giulio oppure Alice.';
+    return;
+  }
+
+  const testoDaInviare = testoImportAnalizzato;
+  const elementiDaImportare = elementiImportAnalizzati.slice();
+  const gruppi = raggruppaImportazioneClient(elementiDaImportare);
+  const esistenti = new Set(listaCorrente.map(item => normalizzaClient(item.prodotto)));
+  const nuovi = gruppi.filter(item => !esistenti.has(item.chiave)).length;
+  const giaPresenti = gruppi.length - nuovi;
+
+  setBusy(true);
+  applicaImportLocale(elementiDaImportare);
+  document.getElementById('messaggio').textContent =
+    `${nuovi} aggiunti, ${giaPresenti} già presenti.`;
+
+  try {
+    await postSenzaCors({ action: 'importa', testo: testoDaInviare, utente: utenteCorrente });
+    document.getElementById('testoImport').value = '';
+    invalidaAnalisiImportazione();
+    document.getElementById('pannelloImport').hidden = true;
+  } catch (error) {
+    mostraErrore(error);
+  } finally {
+    setBusy(false);
+    mostraLista(listaCorrente);
+    riconciliaInBackground();
+  }
+}
+
 async function chiudiSpesa() {
   if (operazioneInCorso) return;
   if (!listaCorrente.length) {
@@ -519,6 +680,76 @@ function parseInputClient(input) {
   return { prodotto, quantita };
 }
 
+function parseTestoImportazioneClient(testo) {
+  return String(testo || '')
+    .split(/\r?\n/)
+    .map(parseRigaImportazioneClient)
+    .filter(elemento => elemento !== null);
+}
+
+function parseRigaImportazioneClient(riga) {
+  const testo = String(riga || '').trim().replace(/\s+/g, ' ');
+  if (!testo) return null;
+
+  const parti = testo.split(' ');
+  let quantita = parseQuantitaItalianaClient(parti[0]);
+  let indiceQuantita = quantita !== null && parti.length > 1 ? 0 : -1;
+  if (indiceQuantita < 0) {
+    quantita = parseQuantitaItalianaClient(parti[parti.length - 1]);
+    indiceQuantita = quantita !== null && parti.length > 1 ? parti.length - 1 : -1;
+  }
+  if (indiceQuantita < 0) quantita = 1;
+  else parti.splice(indiceQuantita, 1);
+
+  let prodotto = parti.join(' ').trim().replace(/\s+/g, ' ');
+  prodotto = prodotto.charAt(0).toUpperCase() + prodotto.slice(1);
+  return { prodotto, quantita };
+}
+
+function parseQuantitaItalianaClient(valore) {
+  const token = normalizzaClient(valore).replace(/[-'’]/g, '');
+  if (/^\d+$/.test(token)) {
+    const numero = parseInt(token, 10);
+    return numero > 0 ? numero : null;
+  }
+  const unita = {
+    un: 1, uno: 1, una: 1, due: 2, tre: 3, quattro: 4, cinque: 5,
+    sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10, undici: 11,
+    dodici: 12, tredici: 13, quattordici: 14, quindici: 15,
+    sedici: 16, diciassette: 17, diciotto: 18, diciannove: 19
+  };
+  if (Object.prototype.hasOwnProperty.call(unita, token)) return unita[token];
+  const decine = {
+    venti: 20, trenta: 30, quaranta: 40, cinquanta: 50,
+    sessanta: 60, settanta: 70, ottanta: 80, novanta: 90
+  };
+  if (Object.prototype.hasOwnProperty.call(decine, token)) return decine[token];
+  const cifre = { uno: 1, due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9 };
+  for (const [nomeDecina, valoreDecina] of Object.entries(decine)) {
+    for (const [nomeCifra, valoreCifra] of Object.entries(cifre)) {
+      const radice = nomeCifra === 'uno' || nomeCifra === 'otto'
+        ? nomeDecina.slice(0, -1)
+        : nomeDecina;
+      if (token === radice + nomeCifra) return valoreDecina + valoreCifra;
+    }
+  }
+  return null;
+}
+
+function raggruppaImportazioneClient(elementi) {
+  const perChiave = new Map();
+  elementi.forEach(elemento => {
+    const chiave = normalizzaClient(elemento.prodotto);
+    const esistente = perChiave.get(chiave);
+    if (!esistente) {
+      perChiave.set(chiave, { chiave, prodotto: elemento.prodotto, quantita: elemento.quantita });
+    } else {
+      esistente.quantita = Math.max(esistente.quantita, elemento.quantita);
+    }
+  });
+  return Array.from(perChiave.values());
+}
+
 function normalizzaClient(testo) {
   return String(testo || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
@@ -534,6 +765,11 @@ function mostraErrore(error) {
 document.getElementById('prodotto').addEventListener('keydown', event => {
   if (event.key === 'Enter') aggiungi();
 });
+document.getElementById('btnApriImport').addEventListener('click', apriImportazione);
+document.getElementById('btnAnalizzaImport').addEventListener('click', analizzaImportazione);
+document.getElementById('btnAnnullaImport').addEventListener('click', annullaImportazione);
+document.getElementById('btnConfermaImport').addEventListener('click', confermaImportazione);
+document.getElementById('testoImport').addEventListener('input', invalidaAnalisiImportazione);
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
 

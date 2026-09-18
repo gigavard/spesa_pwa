@@ -152,3 +152,70 @@ test('browser CRUD is reconciled with the real Google Sheet without reload', asy
     }
   }
 });
+
+test('REQ-IMPORT-001: real Sheet bulk import deduplicates and keeps maximum quantities', async ({ request }, testInfo) => {
+  const runId = randomUUID();
+  const firstProduct = `Codex import ${runId}`;
+  const secondProduct = `Codex import altro ${runId}`;
+  const products = [firstProduct, secondProduct];
+  let mutationAttempted = false;
+
+  async function removeTestProducts() {
+    for (const product of products) {
+      await expect.poll(async () => {
+        if (await persistedQuantity(request, product) === null) return null;
+        try {
+          await request.post(api, {
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            data: JSON.stringify({ action: 'rimuovi', prodotto: product }),
+            timeout: 15000
+          });
+        } catch (_) {
+          // A lost POST response does not establish whether the deletion ran.
+        }
+        return persistedQuantity(request, product);
+      }, {
+        timeout: 60000, intervals: [500, 1000, 2000], message: `Cleanup failed: ${product}`
+      }).toBe(null);
+    }
+  }
+
+  async function postImport(testo, utente) {
+    try {
+      await request.post(api, {
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        data: JSON.stringify({ action: 'importa', testo, utente }),
+        timeout: 20000
+      });
+    } catch (_) {
+      // Persistence is established by the independent GET polls below.
+    }
+  }
+
+  try {
+    for (const product of products) expect(await persistedQuantity(request, product)).toBe(null);
+    mutationAttempted = true;
+    await postImport(`2 ${firstProduct}\n${firstProduct} tre\n${secondProduct}`, 'Giulio');
+
+    await expect.poll(() => persistedQuantity(request, firstProduct), {
+      timeout: 45000, intervals: [500, 1000, 2000]
+    }).toBe(3);
+    await expect.poll(() => persistedQuantity(request, secondProduct), {
+      timeout: 45000, intervals: [500, 1000, 2000]
+    }).toBe(1);
+
+    await postImport(`quattro ${firstProduct}\nun ${secondProduct}`, 'Alice');
+
+    await expect.poll(() => persistedQuantity(request, firstProduct), {
+      timeout: 45000, intervals: [500, 1000, 2000]
+    }).toBe(4);
+    await expect.poll(() => persistedQuantity(request, secondProduct), {
+      timeout: 45000, intervals: [500, 1000, 2000]
+    }).toBe(1);
+  } finally {
+    if (mutationAttempted) {
+      testInfo.setTimeout(testInfo.timeout + 90000);
+      await removeTestProducts();
+    }
+  }
+});

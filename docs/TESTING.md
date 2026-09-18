@@ -16,7 +16,7 @@ Il product owner ha autorizzato esplicitamente l'uso del Google Sheet condiviso 
 Per conservare risultati leggibili e non confonderli con la spesa reale:
 
 - i prodotti creati automaticamente usano un nome univoco riconoscibile come dato di test;
-- ogni test CRUD elimina soltanto i dati creati dalla propria esecuzione;
+- ogni test CRUD o import bulk elimina soltanto i dati creati dalla propria esecuzione;
 - il test verifica lo stato persistito con una nuova lettura, perché la risposta POST `no-cors` è opaca;
 - una pulizia fallita viene segnalata e non viene nascosta;
 - i test concorrenti sul foglio sono serializzati;

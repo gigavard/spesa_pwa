@@ -180,6 +180,75 @@ test('REQ-LIFE-001: adding a product writes the four-column schema', () => {
   assert.deepEqual(app.metrics(), { flushes: 0, lockWaits: 1, lockReleases: 1 });
 });
 
+test('REQ-IMPORT-001: import parser recognizes quantities at either end from one to ninety-nine', () => {
+  const app = loadAppsScript({
+    listaRows: [['Prodotto', 'Quantità', 'Data', 'Autore']]
+  });
+  const parse = app.getFunction('parseTestoImportazione');
+
+  const parsed = Array.from(parse([
+    '2 banane morbide',
+    'detersivo per piatti',
+    'scottex',
+    'fagioli scatola tre',
+    'una mela',
+    'ventuno uova',
+    'yogurt ventitré',
+    'caramelle novantanove',
+    'due banane',
+    'banane due'
+  ].join('\n')), item => ({ ...item }));
+
+  assert.deepEqual(parsed, [
+    { prodotto: 'Banane morbide', quantita: 2 },
+    { prodotto: 'Detersivo per piatti', quantita: 1 },
+    { prodotto: 'Scottex', quantita: 1 },
+    { prodotto: 'Fagioli scatola', quantita: 3 },
+    { prodotto: 'Mela', quantita: 1 },
+    { prodotto: 'Uova', quantita: 21 },
+    { prodotto: 'Yogurt', quantita: 23 },
+    { prodotto: 'Caramelle', quantita: 99 },
+    { prodotto: 'Banane', quantita: 2 },
+    { prodotto: 'Banane', quantita: 2 }
+  ]);
+});
+
+test('REQ-IMPORT-001: bulk import keeps existing metadata and applies maximum duplicate quantity', () => {
+  const app = loadAppsScript({
+    listaRows: [
+      ['Prodotto', 'Quantità', 'Data', 'Autore'],
+      ['Banane', 4, '17/09/2026', 'Giulio'],
+      ['Latte', 2, '16/09/2026', 'Alice']
+    ]
+  });
+
+  const result = app.getFunction('importaProdotti')([
+    '2 banane',
+    'due banane',
+    'banane cinque',
+    'latte uno',
+    'mele tre',
+    'cinque mele',
+    'scottex'
+  ].join('\n'), 'Alice');
+
+  assert.deepEqual({ ...result }, {
+    ok: true,
+    aggiunti: 2,
+    aggiornati: 1,
+    giaPresenti: 2,
+    messaggio: '2 aggiunti, 1 aggiornati, 2 già presenti.'
+  });
+  assert.deepEqual(app.lista.rows, [
+    ['Prodotto', 'Quantità', 'Data', 'Autore'],
+    ['Banane', 5, '17/09/2026', 'Giulio'],
+    ['Latte', 2, '16/09/2026', 'Alice'],
+    ['Mele', 5, '18/09/2026', 'Alice'],
+    ['Scottex', 1, '18/09/2026', 'Alice']
+  ]);
+  assert.deepEqual(app.metrics(), { flushes: 1, lockWaits: 1, lockReleases: 1 });
+});
+
 test('REQ-LIFE-001: closing archives every product and clears four list columns', () => {
   const app = loadAppsScript({
     listaRows: [
