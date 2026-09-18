@@ -31,4 +31,4 @@ I test automatici sono superati, la versione pubblicata conserva il flusso manua
 
 ## Avanzamento
 
-Passi 1-9 completati il 18 settembre 2026. Sono passati 6 test backend, 1 test manifest e 8 test frontend. Restano pubblicazione e prova Android del passo 10.
+Passi 1-9 completati il 18 settembre 2026. Sono passati 6 test backend, 1 test manifest e 8 test frontend. Il commit `a6a549d` è pubblicato e verificato con un browser sul sito reale. Del passo 10 resta la prova con microfono Android.
