@@ -9,14 +9,28 @@
   "description": "Lista della spesa condivisa",
   "icons": [
     {
-      "src": "https://cdn.jsdelivr.net/npm/@mdi/png@7.4.47/192x192/cart.png",
+      "src": "./icons/spesa-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
-      "src": "https://cdn.jsdelivr.net/npm/@mdi/png@7.4.47/512x512/cart.png",
+      "src": "./icons/spesa-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/spesa-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./icons/spesa-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

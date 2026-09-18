@@ -90,15 +90,13 @@ function getListaSpesa() {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
-  const valori = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  const valori = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
   const lista = [];
 
   for (let i = 0; i < valori.length; i++) {
     const prodotto = valori[i][0];
     const quantita = Number(valori[i][1]) || 1;
-    const stato = valori[i][4];
-
-    if (prodotto && stato === 'Da comprare') {
+    if (prodotto) {
       lista.push({
         prodotto: String(prodotto),
         quantita: quantita
@@ -136,8 +134,7 @@ function aggiungiProdotto(testo, aggiuntoDa) {
       parsed.prodotto,
       parsed.quantita,
       oggi,
-      aggiuntoDa || '',
-      'Da comprare'
+      aggiuntoDa || ''
     ]);
 
     return {
@@ -192,13 +189,11 @@ function trovaProdotto(sheet, prodottoCercato) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return null;
 
-  const valori = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  const valori = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
 
   for (let i = 0; i < valori.length; i++) {
     const prodotto = valori[i][0];
-    const stato = valori[i][4];
-
-    if (prodotto && stato === 'Da comprare' && normalizza(prodotto) === target) {
+    if (prodotto && normalizza(prodotto) === target) {
       return {
         riga: i + 2,
         prodotto: String(prodotto),
@@ -243,15 +238,14 @@ function chiudiSpesa() {
       return { ok: false, messaggio: 'La lista è già vuota.' };
     }
 
-    const valori = lista.getRange(2, 1, lastRow - 1, 5).getValues();
+    const valori = lista.getRange(2, 1, lastRow - 1, 4).getValues();
     const oggi = Utilities.formatDate(new Date(), 'Europe/Rome', 'dd/MM/yyyy');
     const righeStorico = [];
 
     valori.forEach(function(riga) {
       const prodotto = riga[0];
       const quantita = Number(riga[1]) || 1;
-      const stato = riga[4];
-      if (prodotto && stato === 'Da comprare') {
+      if (prodotto) {
         righeStorico.push([prodotto, quantita, oggi]);
       }
     });
@@ -262,7 +256,7 @@ function chiudiSpesa() {
         .setValues(righeStorico);
     }
 
-    lista.getRange(2, 1, lastRow - 1, 5).clearContent();
+    lista.getRange(2, 1, lastRow - 1, 4).clearContent();
     SpreadsheetApp.flush();
 
     return {
@@ -293,6 +287,33 @@ function getFoglio() {
   const sheet = ss.getSheetByName(NOME_LISTA);
   if (!sheet) throw new Error('Foglio "Lista Spesa" non trovato');
   return sheet;
+}
+
+function migraRimuoviColonnaStato() {
+  return conLock(function() {
+    const sheet = getFoglio();
+    const intestazione = String(sheet.getRange(1, 5).getValue() || '').trim();
+
+    if (!intestazione) {
+      return {
+        ok: true,
+        migrato: false,
+        messaggio: 'La colonna Stato risulta già assente.'
+      };
+    }
+
+    if (normalizza(intestazione) !== 'stato') {
+      throw new Error(`Migrazione interrotta: intestazione E1 inattesa (${intestazione}).`);
+    }
+
+    sheet.deleteColumn(5);
+    SpreadsheetApp.flush();
+    return {
+      ok: true,
+      migrato: true,
+      messaggio: 'Colonna Stato rimossa da Lista Spesa.'
+    };
+  });
 }
 
 function parseInput(input) {

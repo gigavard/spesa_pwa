@@ -12,7 +12,7 @@ PWA in italiano per gestire una lista della spesa condivisa: prodotti, quantità
 ## Vincoli
 
 - Una risposta POST opaca non conferma il successo applicativo: preservare la riconciliazione con il backend.
-- Preservare il contratto API e la struttura dei fogli: `Lista Spesa` contiene prodotto, quantità, data, autore e stato; `Storico` contiene prodotto, quantità e data. Conservare le intestazioni.
+- Preservare il contratto API e la struttura dei fogli: `Lista Spesa` contiene prodotto, quantità, data e autore; `Storico` contiene prodotto, quantità e data. La presenza nella lista implica “da comprare”, la presenza nello storico implica “comprato”. Conservare le intestazioni.
 - Identificare i prodotti tramite nome normalizzato, senza usare indici di riga nel frontend. Mantenere coerenti parsing e normalizzazione tra client e server.
 - Il service worker usa la rete; non presumere disponibilità offline.
 - Non inserire credenziali nel codice né usare dati reali per test distruttivi.

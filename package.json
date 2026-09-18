@@ -1,0 +1,14 @@
+{
+  "name": "spesa-pwa",
+  "private": true,
+  "scripts": {
+    "test": "npm run test:backend && npm run test:manifest && playwright test",
+    "test:backend": "node tests/apps-script.test.js",
+    "test:manifest": "node tests/manifest.test.js",
+    "test:frontend": "npm run test:manifest && playwright test --project=frontend",
+    "test:e2e": "playwright test --project=sheet"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.0"
+  }
+}

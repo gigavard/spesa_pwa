@@ -29,10 +29,14 @@
     .scelta-titolo { font-size: 20px; margin-bottom: 14px; }
     .scelta-bottoni { display: flex; gap: 12px; }
     .scelta-bottoni button { flex: 1; padding: 16px; font-size: 20px; }
+    .install-button { width: 100%; margin: -8px 0 20px; padding: 12px; border: 1px solid #087f3f; border-radius: 10px; background: #e9f7ef; color: #075f31; font-size: 17px; font-weight: bold; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
   <h1>🛒 Spesa</h1>
+
+  <button id="btnInstalla" class="install-button" type="button" hidden>⬇ Installa app</button>
 
   <div id="sceltaUtente" style="display:none;">
     <div class="scelta-titolo">Chi usa questa app?</div>
@@ -70,6 +74,7 @@ let utenteCorrente = localStorage.getItem('utenteSpesa');
 let listaCorrente = [];
 let operazioneInCorso = false;
 let reconcileToken = 0;
+let installPrompt = null;
 
 if (!utenteCorrente) document.getElementById('sceltaUtente').style.display = 'block';
 aggiornaUtenteUI();
@@ -92,7 +97,41 @@ function aggiornaUtenteUI() {
   document.getElementById('nomeUtente').textContent = utenteCorrente || 'Nessuno';
 }
 
+function appInStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches;
+}
+
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault();
+  installPrompt = event;
+  if (!appInStandalone()) document.getElementById('btnInstalla').hidden = false;
+});
+
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  document.getElementById('btnInstalla').hidden = true;
+  document.getElementById('messaggio').textContent = 'App installata.';
+});
+
+document.getElementById('btnInstalla').addEventListener('click', async () => {
+  if (!installPrompt) return;
+  const promptCorrente = installPrompt;
+  installPrompt = null;
+  document.getElementById('btnInstalla').hidden = true;
+
+  try {
+    await promptCorrente.prompt();
+    const scelta = await promptCorrente.userChoice;
+    document.getElementById('messaggio').textContent = scelta.outcome === 'accepted'
+      ? 'Installazione avviata.'
+      : 'Installazione annullata.';
+  } catch (error) {
+    document.getElementById('messaggio').textContent = 'Impossibile avviare l’installazione.';
+  }
+});
+
 function setBusy(busy) {
+  if (busy && !operazioneInCorso) reconcileToken++;
   operazioneInCorso = busy;
   document.getElementById('prodotto').disabled = busy;
   document.getElementById('btnAggiungi').disabled = busy;
@@ -141,7 +180,15 @@ async function leggiLista() {
 
 async function caricaLista() {
   try {
-    listaCorrente = await leggiLista();
+    for (let tentativo = 0; tentativo < 3; tentativo++) {
+      try {
+        listaCorrente = await leggiLista();
+        break;
+      } catch (error) {
+        if (tentativo === 2) throw error;
+        await attesa(700);
+      }
+    }
     mostraLista(listaCorrente);
     return listaCorrente;
   } catch (error) {
