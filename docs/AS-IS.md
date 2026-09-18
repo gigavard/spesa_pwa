@@ -123,6 +123,8 @@ Gli spazi interni vengono compattati durante il parsing dei nuovi prodotti. La n
 
 L'interfaccia è pensata per schermi stretti, con larghezza massima di 500 px e pulsanti touch. Il rendering dei nomi usa `textContent`, evitando che il testo di un prodotto venga interpretato come HTML.
 
+Nei browser che espongono `SpeechRecognition` o `webkitSpeechRecognition`, accanto al campo appare un pulsante microfono. Avvia una sessione singola in italiano e sostituisce il contenuto del campo con il risultato finale. La trascrizione resta modificabile e non aggiunge nulla finché l'utente non preme `Aggiungi`. In caso di browser non supportato o errore, l'inserimento manuale resta disponibile.
+
 Sono presenti le conferme richieste prima di:
 
 - chiudere la spesa;
@@ -163,7 +165,7 @@ Le credenziali non sono nel repository. Identificativi del progetto e del deploy
 | Livello | File/workflow | Copertura effettiva |
 |---|---|---|
 | sintassi | esecuzione locale con Node | JavaScript del frontend, service worker, test, server e backend Apps Script |
-| browser simulato | `tests/frontend.spec.js` | retry della prima lettura; protezione da riconciliazioni obsolete; decremento, incremento ed eliminazione; controlli nuovamente usabili |
+| browser simulato | `tests/frontend.spec.js` | retry della prima lettura; installazione; voce; protezione da riconciliazioni obsolete; controlli nuovamente usabili |
 | browser con foglio reale | `tests/sheet.spec.js` | aggiunta, incremento, decremento, eliminazione e riconciliazione; prodotto univoco e pulizia mirata |
 | smoke pubblicato | `.github/workflows/smoke.yml` | raggiungibilità frontend, GET JSONP e POST innocuo verso Apps Script |
 | CI frontend | `.github/workflows/frontend-e2e.yml` | checkout locale con backend simulato; test reale solo su avvio manuale esplicito |
@@ -174,7 +176,7 @@ Verifiche svolte sullo stato corrente:
 
 - test backend Apps Script isolati: 6 superati, inclusi schema a quattro colonne, chiusura completa e migrazione;
 - controllo sintattico JavaScript: superato;
-- test Playwright simulati: 3 superati con Chromium, incluso il caso di regressione `REQ-SYNC-001`;
+- test frontend correnti: 8 superati, inclusi 3 scenari vocali con motore simulato;
 - test CRUD con Google Sheet reale: 1 superato, con prodotto univoco e pulizia verificata;
 - migrazione del foglio reale: completata, colonna `Stato` rimossa;
 - backend pubblicato: deployment versione 17 verificato in lettura;

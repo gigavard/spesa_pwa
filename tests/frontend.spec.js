@@ -82,6 +82,131 @@ test('REQ-PWA-001: install button stays hidden in standalone mode', async ({ pag
   await expect(page.locator('#btnInstalla')).toBeHidden();
 });
 
+test('REQ-VOICE-001: speech replaces the field and waits for manual add', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__voiceStarts = 0;
+    class FakeSpeechRecognition {
+      constructor() {
+        window.__voiceRecognition = this;
+      }
+      start() {
+        window.__voiceStarts++;
+        if (this.onstart) this.onstart();
+      }
+    }
+    window.SpeechRecognition = FakeSpeechRecognition;
+    window.webkitSpeechRecognition = undefined;
+  });
+  let lista = [];
+  const posts = [];
+  await page.route('https://script.google.com/**', async route => {
+    const request = route.request();
+    if (request.method() === 'GET') {
+      const callback = new URL(request.url()).searchParams.get('callback');
+      return route.fulfill({
+        contentType: 'application/javascript',
+        body: `${callback}(${JSON.stringify({ ok: true, lista })});`
+      });
+    }
+    const data = JSON.parse(request.postData() || '{}');
+    posts.push(data);
+    if (data.action === 'aggiungi') lista = [{ prodotto: 'Banane', quantita: 4 }];
+    return route.fulfill({ status: 200, body: '' });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Alice', exact: true }).click();
+  const input = page.locator('#prodotto');
+  const voiceButton = page.locator('#btnVoce');
+  await expect(voiceButton).toBeVisible();
+  await input.fill('testo precedente');
+
+  await voiceButton.click();
+  await expect(voiceButton).toBeDisabled();
+  await expect(voiceButton).toHaveAccessibleName('Ascolto in corso');
+  await expect(page.locator('#messaggio')).toHaveText('Ascolto...');
+  expect(await page.evaluate(() => ({
+    starts: window.__voiceStarts,
+    lang: window.__voiceRecognition.lang,
+    continuous: window.__voiceRecognition.continuous,
+    interimResults: window.__voiceRecognition.interimResults,
+    maxAlternatives: window.__voiceRecognition.maxAlternatives
+  }))).toEqual({
+    starts: 1,
+    lang: 'it-IT',
+    continuous: false,
+    interimResults: false,
+    maxAlternatives: 1
+  });
+
+  await page.evaluate(() => {
+    const result = [{ transcript: ' 4 banane ' }];
+    result.isFinal = true;
+    window.__voiceRecognition.onresult({ resultIndex: 0, results: [result] });
+    window.__voiceRecognition.onend();
+  });
+  await expect(input).toHaveValue('4 banane');
+  await expect(voiceButton).toBeEnabled();
+  await expect(page.locator('#messaggio')).toHaveText('Testo riconosciuto. Controlla e premi Aggiungi.');
+  expect(posts).toHaveLength(0);
+
+  await page.getByRole('button', { name: 'Aggiungi', exact: true }).click();
+  await expect(page.locator('.nome-prodotto')).toHaveText('Banane');
+  await expect(page.locator('.quantita')).toHaveText('4');
+  expect(posts).toHaveLength(1);
+  expect(posts[0]).toMatchObject({ action: 'aggiungi', testo: '4 banane', utente: 'Alice' });
+});
+
+test('REQ-VOICE-001: denied microphone permission restores manual input', async ({ page }) => {
+  await page.addInitScript(() => {
+    class FakeSpeechRecognition {
+      constructor() { window.__voiceRecognition = this; }
+      start() { if (this.onstart) this.onstart(); }
+    }
+    window.SpeechRecognition = FakeSpeechRecognition;
+    window.webkitSpeechRecognition = undefined;
+  });
+  await page.route('https://script.google.com/**', async route => {
+    const callback = new URL(route.request().url()).searchParams.get('callback');
+    await route.fulfill({
+      contentType: 'application/javascript',
+      body: `${callback}(${JSON.stringify({ ok: true, lista: [] })});`
+    });
+  });
+  await page.goto('/');
+
+  const voiceButton = page.locator('#btnVoce');
+  await voiceButton.click();
+  await page.evaluate(() => {
+    window.__voiceRecognition.onerror({ error: 'not-allowed' });
+    window.__voiceRecognition.onend();
+  });
+
+  await expect(page.locator('#messaggio')).toHaveText('Permesso microfono negato.');
+  await expect(voiceButton).toBeEnabled();
+  await expect(page.locator('#prodotto')).toBeEditable();
+  await expect(page.locator('#btnAggiungi')).toBeEnabled();
+});
+
+test('REQ-VOICE-001: unsupported browser keeps manual input and hides microphone', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'SpeechRecognition', { value: undefined, configurable: true });
+    Object.defineProperty(window, 'webkitSpeechRecognition', { value: undefined, configurable: true });
+  });
+  await page.route('https://script.google.com/**', async route => {
+    const callback = new URL(route.request().url()).searchParams.get('callback');
+    await route.fulfill({
+      contentType: 'application/javascript',
+      body: `${callback}(${JSON.stringify({ ok: true, lista: [] })});`
+    });
+  });
+  await page.goto('/');
+
+  await expect(page.locator('#btnVoce')).toBeHidden();
+  await expect(page.locator('#prodotto')).toBeEditable();
+  await expect(page.locator('#btnAggiungi')).toBeEnabled();
+});
+
 test('REQ-SYNC-001: stale reconciliation cannot overwrite a newer optimistic mutation', async ({ page }) => {
   let lista = [{ prodotto: 'Latte', quantita: 2 }];
   let reads = 0;

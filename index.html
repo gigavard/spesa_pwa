@@ -15,13 +15,15 @@
     input { flex: 1; min-width: 0; font-size: 22px; padding: 14px; box-sizing: border-box; }
     button { touch-action: manipulation; }
     .add-button { font-size: 20px; padding: 14px 18px; }
+    .voice-button { width: 52px; flex: 0 0 52px; border: 1px solid #aaa; border-radius: 8px; background: #f5f5f5; font-size: 23px; }
+    .voice-button.ascolto { border-color: #b42318; background: #fee4e2; }
     #messaggio { margin-top: 16px; min-height: 24px; font-size: 18px; }
     #lista { margin-top: 28px; }
     .riga-prodotto { display: flex; align-items: center; gap: 8px; padding: 12px 0; border-bottom: 1px solid #ddd; }
     .nome-prodotto { flex: 1; font-size: 21px; overflow-wrap: anywhere; }
     .quantita { min-width: 28px; text-align: center; font-size: 20px; font-weight: bold; }
     .azione { width: 42px; height: 42px; border: none; border-radius: 8px; font-size: 22px; cursor: pointer; }
-    .azione:disabled, .add-button:disabled, .azione-principale:disabled, .azione-secondaria:disabled { opacity: .45; cursor: default; }
+    .azione:disabled, .add-button:disabled, .voice-button:disabled, .azione-principale:disabled, .azione-secondaria:disabled { opacity: .45; cursor: default; }
     .vuota { font-size: 18px; color: #666; }
     .azione-principale { width: 100%; padding: 14px; font-size: 20px; }
     .azione-secondaria { width: 100%; padding: 12px; font-size: 16px; }
@@ -53,10 +55,11 @@
 
   <div class="input-row">
     <input id="prodotto" type="text" placeholder="Es. 2 latte" autofocus>
+    <button id="btnVoce" class="voice-button" type="button" aria-label="Inserimento vocale" title="Inserimento vocale" hidden>🎤</button>
     <button id="btnAggiungi" class="add-button" onclick="aggiungi()">Aggiungi</button>
   </div>
 
-  <div id="messaggio"></div>
+  <div id="messaggio" aria-live="polite"></div>
   <div id="lista"></div>
 
   <div style="margin-top:32px;">
@@ -75,9 +78,14 @@ let listaCorrente = [];
 let operazioneInCorso = false;
 let reconcileToken = 0;
 let installPrompt = null;
+let riconoscimentoVocale = null;
+let ascoltoVocale = false;
+let risultatoVocaleRicevuto = false;
+let erroreVocaleRicevuto = false;
 
 if (!utenteCorrente) document.getElementById('sceltaUtente').style.display = 'block';
 aggiornaUtenteUI();
+configuraRiconoscimentoVocale();
 
 function impostaUtente(nome) {
   utenteCorrente = nome;
@@ -130,6 +138,87 @@ document.getElementById('btnInstalla').addEventListener('click', async () => {
   }
 });
 
+function configuraRiconoscimentoVocale() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return;
+
+  const bottone = document.getElementById('btnVoce');
+  try {
+    riconoscimentoVocale = new SpeechRecognition();
+  } catch (_) {
+    return;
+  }
+
+  riconoscimentoVocale.lang = 'it-IT';
+  riconoscimentoVocale.continuous = false;
+  riconoscimentoVocale.interimResults = false;
+  riconoscimentoVocale.maxAlternatives = 1;
+  bottone.hidden = false;
+
+  riconoscimentoVocale.onresult = event => {
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      if (!event.results[i].isFinal || !event.results[i][0]) continue;
+      const trascrizione = String(event.results[i][0].transcript || '').trim();
+      if (!trascrizione) continue;
+      risultatoVocaleRicevuto = true;
+      const input = document.getElementById('prodotto');
+      input.value = trascrizione;
+      input.focus();
+      document.getElementById('messaggio').textContent = 'Testo riconosciuto. Controlla e premi Aggiungi.';
+      break;
+    }
+  };
+
+  riconoscimentoVocale.onerror = event => {
+    erroreVocaleRicevuto = true;
+    const messaggi = {
+      'not-allowed': 'Permesso microfono negato.',
+      'service-not-allowed': 'Permesso microfono non disponibile.',
+      'no-speech': 'Non ho sentito nulla. Riprova.',
+      'audio-capture': 'Microfono non disponibile.'
+    };
+    document.getElementById('messaggio').textContent = messaggi[event.error] || 'Riconoscimento vocale non riuscito.';
+  };
+
+  riconoscimentoVocale.onend = () => {
+    if (!risultatoVocaleRicevuto && !erroreVocaleRicevuto) {
+      document.getElementById('messaggio').textContent = 'Non ho sentito nulla. Riprova.';
+    }
+    ascoltoVocale = false;
+    aggiornaPulsanteVoce();
+  };
+
+  bottone.addEventListener('click', avviaRiconoscimentoVocale);
+  aggiornaPulsanteVoce();
+}
+
+function aggiornaPulsanteVoce() {
+  const bottone = document.getElementById('btnVoce');
+  if (!riconoscimentoVocale) return;
+  bottone.disabled = operazioneInCorso || ascoltoVocale;
+  bottone.classList.toggle('ascolto', ascoltoVocale);
+  bottone.textContent = ascoltoVocale ? '…' : '🎤';
+  bottone.setAttribute('aria-label', ascoltoVocale ? 'Ascolto in corso' : 'Inserimento vocale');
+}
+
+function avviaRiconoscimentoVocale() {
+  if (!riconoscimentoVocale || ascoltoVocale || operazioneInCorso) return;
+  ascoltoVocale = true;
+  risultatoVocaleRicevuto = false;
+  erroreVocaleRicevuto = false;
+  aggiornaPulsanteVoce();
+  document.getElementById('messaggio').textContent = 'Ascolto...';
+
+  try {
+    riconoscimentoVocale.start();
+  } catch (_) {
+    erroreVocaleRicevuto = true;
+    ascoltoVocale = false;
+    aggiornaPulsanteVoce();
+    document.getElementById('messaggio').textContent = 'Riconoscimento vocale non riuscito.';
+  }
+}
+
 function setBusy(busy) {
   if (busy && !operazioneInCorso) reconcileToken++;
   operazioneInCorso = busy;
@@ -138,6 +227,7 @@ function setBusy(busy) {
   document.getElementById('btnChiudi').disabled = busy;
   document.getElementById('btnPulisci').disabled = busy;
   document.querySelectorAll('.azione').forEach(btn => btn.disabled = busy);
+  aggiornaPulsanteVoce();
 }
 
 function conTimeout(promise, ms, messaggio) {

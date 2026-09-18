@@ -44,6 +44,8 @@ Il riconoscimento non deve aggiungere automaticamente elementi ambigui. La trasc
 
 Criterio di completamento: su entrambi i telefoni, “4 banane” produce una trascrizione modificabile e aggiunge `Banane` con quantità 4; errori e mancato supporto non bloccano l'inserimento manuale.
 
+Pulsante, trascrizione sostitutiva e conferma manuale sono implementati in `REQ-VOICE-001`; restano pubblicazione e prova con microfono reale su Android.
+
 ## 4. Preparare i dati per i suggerimenti
 
 Prima dell'agente serve un accesso controllato allo storico. Il minimo utile è un endpoint di sola lettura che restituisca righe storiche o, preferibilmente, aggregati necessari al caso d'uso.
