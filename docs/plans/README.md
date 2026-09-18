@@ -7,4 +7,4 @@ I piani traducono una specifica approvata in modifiche e verifiche ordinate.
 | [`PLAN-SYNC-001`](./PLAN-SYNC-001.md) | Correzione della corsa di riconciliazione | Verificato | `SPEC-SYNC-001` |
 | [`PLAN-LIFE-001`](./PLAN-LIFE-001.md) | Rimozione dello stato e migrazione | Verificato | `SPEC-LIFE-001` |
 | [`PLAN-PWA-001`](./PLAN-PWA-001.md) | Pulsante installazione e icone Android | Implementato | `SPEC-PWA-001` |
-| [`PLAN-VOICE-001`](./PLAN-VOICE-001.md) | Inserimento vocale alternativo alla tastiera | Implementato | `SPEC-VOICE-001` |
+| [`PLAN-VOICE-001`](./PLAN-VOICE-001.md) | Inserimento vocale alternativo alla tastiera | Verificato | `SPEC-VOICE-001` |

@@ -123,7 +123,7 @@ Gli spazi interni vengono compattati durante il parsing dei nuovi prodotti. La n
 
 L'interfaccia è pensata per schermi stretti, con larghezza massima di 500 px e pulsanti touch. Il rendering dei nomi usa `textContent`, evitando che il testo di un prodotto venga interpretato come HTML.
 
-Nei browser che espongono `SpeechRecognition` o `webkitSpeechRecognition`, accanto al campo appare un pulsante microfono. Avvia una sessione singola in italiano e sostituisce il contenuto del campo con il risultato finale. La trascrizione resta modificabile e non aggiunge nulla finché l'utente non preme `Aggiungi`. In caso di browser non supportato o errore, l'inserimento manuale resta disponibile. La funzione è pubblicata; un controllo browser del sito reale ne ha verificato il flusso con motore simulato.
+Nei browser che espongono `SpeechRecognition` o `webkitSpeechRecognition`, accanto al campo appare un pulsante microfono. Avvia una sessione singola in italiano e sostituisce il contenuto del campo con il risultato finale. La trascrizione resta modificabile e non aggiunge nulla finché l'utente non preme `Aggiungi`. In caso di browser non supportato o errore, l'inserimento manuale resta disponibile. La funzione è pubblicata e verificata sia automaticamente sia nell'app installata su Android.
 
 Sono presenti le conferme richieste prima di:
 

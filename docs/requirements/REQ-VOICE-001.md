@@ -1,6 +1,6 @@
 # REQ-VOICE-001 — Compilazione vocale del prodotto
 
-Stato: Implementato.
+Stato: Verificato.
 
 ## Contesto e obiettivo
 
@@ -70,4 +70,4 @@ Nessuna.
 
 Il 18 settembre 2026 sono passati tre scenari vocali automatici: trascrizione e conferma manuale, permesso negato e browser non supportato. Nella stessa esecuzione sono passati tutti gli 8 test frontend, oltre a 6 test backend e 1 test manifest. La funzione è stata pubblicata con il commit `a6a549d`; un controllo browser sul sito pubblico ha confermato pulsante visibile con API disponibile, lingua `it-IT`, sostituzione del testo e messaggio di conferma.
 
-I controlli automatici usano un motore vocale simulato e non verificano microfono, permesso e servizio di riconoscimento reali. Il requisito resta `Implementato` fino alla prova su Chrome Android.
+Il product owner ha successivamente confermato il corretto funzionamento nell'app installata su Android. La prova reale completa la verifica di microfono, permesso e servizio di riconoscimento; il requisito passa quindi a `Verificato`.

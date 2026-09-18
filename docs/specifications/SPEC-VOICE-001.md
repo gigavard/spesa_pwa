@@ -1,6 +1,6 @@
 # SPEC-VOICE-001 — Compilazione vocale one-shot
 
-Stato: Implementato.
+Stato: Verificato.
 
 Requisito coperto: [`REQ-VOICE-001`](../requirements/REQ-VOICE-001.md).
 
@@ -72,4 +72,4 @@ La prova del microfono reale resta manuale su Android, perché i test browser si
 
 ## Esito corrente
 
-Pulsante, feature detection, riconoscimento one-shot, sostituzione del testo e gestione degli errori sono implementati e pubblicati. Tre test vocali, tutte le regressioni automatiche e un controllo browser sul sito pubblico sono superati. Resta la prova su microfono Android reale.
+Pulsante, feature detection, riconoscimento one-shot, sostituzione del testo e gestione degli errori sono implementati e pubblicati. Tre test vocali, tutte le regressioni automatiche e un controllo browser sul sito pubblico sono superati. Il product owner ha confermato anche il funzionamento nell'app installata su Android.

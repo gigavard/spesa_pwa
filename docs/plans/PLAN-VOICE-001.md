@@ -1,6 +1,6 @@
 # PLAN-VOICE-001 — Inserimento vocale alternativo alla tastiera
 
-Stato: Implementato.
+Stato: Verificato.
 
 Specifica: [`SPEC-VOICE-001`](../specifications/SPEC-VOICE-001.md).
 
@@ -31,4 +31,4 @@ I test automatici sono superati, la versione pubblicata conserva il flusso manua
 
 ## Avanzamento
 
-Passi 1-9 completati il 18 settembre 2026. Sono passati 6 test backend, 1 test manifest e 8 test frontend. Il commit `a6a549d` è pubblicato e verificato con un browser sul sito reale. Del passo 10 resta la prova con microfono Android.
+Tutti i passi sono completati. Sono passati 6 test backend, 1 test manifest e 8 test frontend. Il commit `a6a549d` è pubblicato e verificato con un browser sul sito reale; il product owner ha confermato il funzionamento del microfono nell'app installata su Android.
