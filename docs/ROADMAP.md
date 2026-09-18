@@ -24,7 +24,7 @@ Il manifest e il service worker esistono già. Per completare il percorso:
 - valutare un piccolo aiuto contestuale per l'installazione, senza renderlo necessario all'uso;
 - definire una strategia di aggiornamento del service worker, anche se resta network-only.
 
-Pulsante, manifest e icone locali sono implementati in `REQ-PWA-001`; pubblicazione e prova Android sono ancora da completare.
+Pulsante, manifest e icone locali sono implementati e pubblicati in `REQ-PWA-001`; resta la prova su un dispositivo Android reale.
 
 Criterio di completamento: entrambi gli utenti possono installare l'app dalla versione pubblicata, avviarla dalla home e ricevere una versione aggiornata dopo un nuovo deploy.
 

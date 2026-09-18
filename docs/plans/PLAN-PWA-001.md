@@ -30,4 +30,4 @@ Test automatici e controlli degli asset passano, la versione pubblicata serve ma
 
 ## Avanzamento
 
-Passi 1-7 completati il 18 settembre 2026. Sono passati 1 test manifest e 5 test frontend. Restano pubblicazione, verifica HTTP e prova manuale Android.
+Passi 1-8 completati il 18 settembre 2026. Sono passati 1 test manifest e 5 test frontend. La verifica HTTP ha confermato pagina, manifest, service worker e quattro icone; Chromium non ha rilevato errori manifest e ha attivato il service worker nello scope pubblicato. Resta la prova manuale Android del passo 9; l'aggiornamento documentale del passo 10 è corrente.

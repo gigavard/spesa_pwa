@@ -144,7 +144,7 @@ Il frontend contiene un pulsante `Installa app`, nascosto finché il browser non
 
 Il service worker intercetta le richieste ma usa sempre la rete e non mantiene una cache. L'app non funziona offline, coerentemente con la dipendenza dal foglio remoto.
 
-L'installazione Android non è ancora considerata verificata perché mancano il controllo della nuova versione sul sito pubblicato e una prova su dispositivo reale. Nome, icone e comportamento del pulsante sono coperti da test automatici locali.
+La nuova versione è pubblicata: pagina, manifest, service worker e quattro icone rispondono correttamente; Chromium non segnala errori manifest e registra un service worker attivo nello scope `/spesa_pwa/`. L'installazione Android non è ancora considerata verificata perché manca una prova su dispositivo reale. Nome, icone e comportamento del pulsante sono coperti da test automatici.
 
 ## Deploy
 
@@ -179,7 +179,8 @@ Verifiche svolte sullo stato corrente:
 - migrazione del foglio reale: completata, colonna `Stato` rimossa;
 - backend pubblicato: deployment versione 17 verificato in lettura;
 - chiusura completa sul foglio reale: non eseguita per non archiviare eventuali prodotti reali; coperta dal test backend isolato;
-- installabilità del sito pubblicato: non verificata.
+- struttura installabile del sito pubblicato: verificata con manifest senza errori e service worker attivo;
+- esperienza sul launcher Android: non ancora verificata su dispositivo reale.
 
 ## Limiti e rischi noti
 

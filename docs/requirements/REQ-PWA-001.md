@@ -56,6 +56,6 @@ Nessuna per l'implementazione iniziale. La resa finale dell'icona verrà verific
 
 ## Esito corrente
 
-Il 18 settembre 2026 sono stati generati e controllati gli asset locali, il manifest è stato aggiornato e i test automatici sono passati: 1 test del manifest e 5 test frontend complessivi.
+Il 18 settembre 2026 sono stati generati e controllati gli asset locali, il manifest è stato aggiornato e i test automatici sono passati: 1 test del manifest e 5 test frontend complessivi. La versione è stata pubblicata con il commit `78bb985`; manifest, service worker e quattro icone risultano raggiungibili. Chromium non segnala errori nel manifest e vede il service worker attivo nello scope corretto.
 
-Restano da verificare sulla versione pubblicata la raggiungibilità degli asset e, su un dispositivo Android, nome, icona, prompt e apertura standalone. Fino a quella prova il requisito resta `Implementato`.
+Resta da verificare su un dispositivo Android reale nome, icona, prompt e apertura standalone. Fino a quella prova il requisito resta `Implementato`.

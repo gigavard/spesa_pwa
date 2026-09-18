@@ -52,4 +52,4 @@ Il service worker resta network-only. L'installabilità non introduce una promes
 
 ## Esito corrente
 
-Pulsante, gestione degli eventi, manifest e icone sono implementati. L'icona sorgente è stata generata con lo strumento integrato `imagegen` usando un carrello bianco centrale su fondo verde, senza testo e nella zona sicura maskable. I test automatici sono superati; pubblicazione e prova Android determinano il passaggio a `Verificato`.
+Pulsante, gestione degli eventi, manifest e icone sono implementati e pubblicati. L'icona sorgente è stata generata con lo strumento integrato `imagegen` usando un carrello bianco centrale su fondo verde, senza testo e nella zona sicura maskable. I test automatici e il controllo Chromium del sito pubblicato sono superati; la prova Android determina il passaggio a `Verificato`.
