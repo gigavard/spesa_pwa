@@ -7,11 +7,12 @@ test('ORDINI, ACQUISTI and ADMIN keep their responsibilities separate', async ({
     { prodotto: 'Latte', quantita: 2 },
     { prodotto: 'Pane', quantita: 1 }
   ];
-  const posts = [];
   await page.route('https://script.google.com/**', async route => {
     const request = route.request();
     if (request.method() === 'GET') {
+      const action = new URL(request.url()).searchParams.get('action');
       const callback = new URL(request.url()).searchParams.get('callback');
+      if (action === 'catalogo') return route.fulfill({ contentType: 'application/javascript', body: `${callback}(${JSON.stringify({ ok: true, catalogo: [] })});` });
       return route.fulfill({
         contentType: 'application/javascript',
         body: `${callback}(${JSON.stringify({ ok: true, lista })});`
@@ -66,6 +67,7 @@ test('ADMIN TEST_MODE switches every backend request and the Sheet link', async 
     if (request.method() === 'GET') {
       const url = new URL(request.url());
       const mode = url.searchParams.get('testMode');
+      const action = url.searchParams.get('action');
       reads.push(mode);
       const callback = url.searchParams.get('callback');
       if (url.searchParams.get('action') === 'ambiente') {
@@ -74,6 +76,7 @@ test('ADMIN TEST_MODE switches every backend request and the Sheet link', async 
           body: `${callback}(${JSON.stringify({ ok: true, testMode: true, spreadsheet: 'ListaSpesaTest' })});`
         });
       }
+      if (action === 'catalogo') return route.fulfill({ contentType: 'application/javascript', body: `${callback}(${JSON.stringify({ ok: true, catalogo: [{ prodotto: 'Mele', categoria: 'Altro', varianti: [] }] })});` });
       const lista = mode === 'true' ? [{ prodotto: 'Solo test', quantita: 1 }] : [];
       return route.fulfill({
         contentType: 'application/javascript',
@@ -140,12 +143,6 @@ test('ORDINI and ACQUISTI group products by the configured category order', asyn
       const callback = new URL(request.url()).searchParams.get('callback');
       return route.fulfill({ contentType: 'application/javascript', body: `${callback}(${JSON.stringify({ ok: true, lista })});` });
     }
-    const data = JSON.parse(request.postData() || '{}');
-    posts.push(data);
-    if (data.action === 'categoria') {
-      const item = lista.find(elemento => elemento.prodotto === data.prodotto);
-      if (item) item.categoria = data.categoria;
-    }
     return route.fulfill({ status: 200, body: '' });
   });
 
@@ -153,14 +150,11 @@ test('ORDINI and ACQUISTI group products by the configured category order', asyn
   await expect(page.locator('#lista .categoria-sezione')).toHaveText([
     'Frutta e verdura', 'Banco frigo', 'Pane'
   ]);
-  const banane = page.locator('#lista .riga-prodotto').filter({ hasText: 'Banane' });
-  await banane.locator('.selettore-categoria').selectOption('Colazione');
-  await expect.poll(() => posts).toHaveLength(1);
-  expect(posts[0]).toMatchObject({ action: 'categoria', prodotto: 'Banane', categoria: 'Colazione', testMode: false });
+  await expect(page.locator('#lista .selettore-categoria')).toHaveCount(0);
 
   await page.locator('#btnAcquisti').click();
   await expect(page.locator('#listaAcquisti .categoria-sezione')).toHaveText([
-    'Banco frigo', 'Colazione', 'Pane'
+    'Banco frigo', 'Pane'
   ]);
   await expect(page.locator('#listaAcquisti .selettore-categoria')).toHaveCount(0);
 });

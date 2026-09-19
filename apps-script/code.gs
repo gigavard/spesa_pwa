@@ -36,6 +36,9 @@ function doGet(e) {
       case 'categorie':
         risposta = { ok: true, categorie: CATEGORIE };
         break;
+      case 'catalogo':
+        risposta = { ok: true, catalogo: ordinaCatalogo(leggiCatalogo(isTestMode(p.testMode))) };
+        break;
       default:
         risposta = { ok: false, messaggio: 'Azione GET non riconosciuta.' };
     }
@@ -81,6 +84,12 @@ function doPost(e) {
         break;
       case 'categoria':
         risposta = assegnaCategoria(dati.prodotto, dati.categoria, testMode);
+        break;
+      case 'riordinaCatalogo':
+        risposta = riordinaCatalogo(dati.prodotto, dati.direzione, testMode);
+        break;
+      case 'aggiungiMultipli':
+        risposta = aggiungiProdottiMultipli(dati.prodotti, dati.utente, testMode);
         break;
       default:
         risposta = { ok: false, messaggio: 'Azione POST non riconosciuta.' };
@@ -133,7 +142,7 @@ function getListaSpesa(testMode) {
     }
   }
 
-  return lista;
+  return ordinaLista(lista, catalogo);
 }
 
 function aggiungiProdotto(testo, aggiuntoDa, testMode) {
@@ -146,6 +155,9 @@ function aggiungiProdotto(testo, aggiuntoDa, testMode) {
     }
 
     const parsed = parseInput(input);
+    const catalogo = leggiCatalogo(testMode);
+    const voce = trovaVoceCatalogo(catalogo, parsed.prodotto);
+    if (voce) parsed.prodotto = voce.prodotto;
     const esistente = trovaProdotto(sheet, parsed.prodotto);
 
     if (esistente) {
@@ -183,23 +195,23 @@ function importaProdotti(testo, aggiuntoDa, testMode) {
     }
 
     const sheet = getFoglio(testMode);
+    const catalogo = leggiCatalogo(testMode);
     const oggi = Utilities.formatDate(new Date(), 'Europe/Rome', 'dd/MM/yyyy');
     const nuoveRighe = [];
-    let aggiornati = 0;
     let giaPresenti = 0;
+    const duplicati = [];
 
     elementi.forEach(function(elemento) {
-      const esistente = trovaProdotto(sheet, elemento.prodotto);
+      const voce = trovaVoceCatalogo(catalogo, elemento.prodotto);
+      const prodotto = voce ? voce.prodotto : elemento.prodotto;
+      const esistente = trovaProdotto(sheet, prodotto);
       if (!esistente) {
-        nuoveRighe.push([elemento.prodotto, elemento.quantita, oggi, aggiuntoDa || '']);
+        nuoveRighe.push([prodotto, elemento.quantita, oggi, aggiuntoDa || '']);
         return;
       }
 
       giaPresenti++;
-      if (elemento.quantita > esistente.quantita) {
-        sheet.getRange(esistente.riga, 2).setValue(elemento.quantita);
-        aggiornati++;
-      }
+      if (duplicati.indexOf(esistente.prodotto) < 0) duplicati.push(esistente.prodotto);
     });
 
     if (nuoveRighe.length > 0) {
@@ -208,21 +220,23 @@ function importaProdotti(testo, aggiuntoDa, testMode) {
         .setValues(nuoveRighe);
     }
 
-    if (nuoveRighe.length > 0 || aggiornati > 0) SpreadsheetApp.flush();
+    if (nuoveRighe.length > 0) SpreadsheetApp.flush();
 
     return {
       ok: true,
       aggiunti: nuoveRighe.length,
-      aggiornati: aggiornati,
+      aggiornati: 0,
       giaPresenti: giaPresenti,
-      messaggio: creaMessaggioImportazione(nuoveRighe.length, aggiornati, giaPresenti)
+      duplicati: duplicati,
+      messaggio: creaMessaggioImportazione(nuoveRighe.length, 0, duplicati)
     };
   });
 }
 
-function creaMessaggioImportazione(aggiunti, aggiornati, giaPresenti) {
-  return aggiunti + ' aggiunti, ' + aggiornati + ' aggiornati, ' +
-    giaPresenti + ' già presenti.';
+function creaMessaggioImportazione(aggiunti, aggiornati, duplicati) {
+  const elenco = Array.isArray(duplicati) ? duplicati : [];
+  return aggiunti + ' aggiunti, ' + elenco.length + ' già presenti.' +
+    (elenco.length ? ' Non inseriti: ' + elenco.join(', ') + '.' : '');
 }
 
 function aumentaQuantitaProdotto(prodotto, testMode) {
@@ -384,8 +398,13 @@ function assegnaCategoria(prodotto, categoria, testMode) {
     const dati = leggiRigheCatalogo(catalogo);
     const voce = trovaVoceCatalogo(dati, prodotto);
 
-    if (!voce) catalogo.appendRow([String(prodotto).trim(), categoriaValida, '']);
-    else catalogo.getRange(voce.riga, 2).setValue(categoriaValida);
+    if (!voce) {
+      catalogo.appendRow([String(prodotto).trim(), categoriaValida, '', prossimoOrdine(dati, categoriaValida)]);
+    } else {
+      const vecchia = voce.categoria;
+      catalogo.getRange(voce.riga, 2).setValue(categoriaValida);
+      if (vecchia !== categoriaValida) catalogo.getRange(voce.riga, 4).setValue(prossimoOrdine(dati, categoriaValida));
+    }
     SpreadsheetApp.flush();
     return { ok: true, prodotto: String(prodotto).trim(), categoria: categoriaValida };
   });
@@ -406,8 +425,10 @@ function getCatalogoFoglio(testMode, giaBloccato) {
       return conLock(function() { return getCatalogoFoglio(testMode, true); });
     }
     sheet = ss.insertSheet(NOME_CATALOGO);
-    sheet.getRange(1, 1, 1, 3).setValues([['Prodotto', 'Categoria', 'Varianti']]);
+    sheet.getRange(1, 1, 1, 4).setValues([['Prodotto', 'Categoria', 'Varianti', 'Ordine']]);
     SpreadsheetApp.flush();
+  } else if (!String(sheet.getRange(1, 4).getValue() || '').trim()) {
+    sheet.getRange(1, 4).setValue('Ordine');
   }
   return sheet;
 }
@@ -415,7 +436,7 @@ function getCatalogoFoglio(testMode, giaBloccato) {
 function leggiRigheCatalogo(sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  return sheet.getRange(2, 1, lastRow - 1, 3).getValues()
+  return sheet.getRange(2, 1, lastRow - 1, 4).getValues()
     .map(function(riga, indice) {
       return {
         riga: indice + 2,
@@ -424,13 +445,95 @@ function leggiRigheCatalogo(sheet) {
           ? String(riga[1]).trim() : 'Altro',
         varianti: String(riga[2] || '').split(';').map(function(item) {
           return item.trim();
-        }).filter(Boolean)
+        }).filter(Boolean),
+        ordine: Number(riga[3]) || null
       };
     }).filter(function(voce) { return voce.prodotto; });
 }
 
 function leggiCatalogo(testMode) {
   return leggiRigheCatalogo(getCatalogoFoglio(testMode));
+}
+
+function prossimoOrdine(catalogo, categoria) {
+  let max = 0;
+  catalogo.forEach(function(voce) {
+    if (voce.categoria === categoria && voce.ordine && voce.ordine > max) max = voce.ordine;
+  });
+  return max + 1;
+}
+
+function indiceCategoria(categoria) {
+  const indice = CATEGORIE.indexOf(categoria);
+  return indice < 0 ? CATEGORIE.length : indice;
+}
+
+function ordinaCatalogo(catalogo) {
+  return (catalogo || []).slice().sort(function(a, b) {
+    const ca = indiceCategoria(a.categoria), cb = indiceCategoria(b.categoria);
+    if (ca !== cb) return ca - cb;
+    if (a.ordine !== null && b.ordine !== null && a.ordine !== b.ordine) return a.ordine - b.ordine;
+    if (a.ordine !== null && b.ordine === null) return -1;
+    if (a.ordine === null && b.ordine !== null) return 1;
+    return normalizza(a.prodotto).localeCompare(normalizza(b.prodotto));
+  });
+}
+
+function ordinaLista(lista, catalogo) {
+  const ordinati = ordinaCatalogo(catalogo || []);
+  const mappa = Object.create(null);
+  ordinati.forEach(function(voce, indice) {
+    mappa[normalizza(voce.prodotto)] = { categoria: voce.categoria, indice: indice };
+  });
+  return (lista || []).map(function(item, indice) {
+    const voce = mappa[normalizza(item.prodotto)];
+    return Object.assign({}, item, { _ordine: voce ? voce.indice : 100000 + indice });
+  }).sort(function(a, b) { return a._ordine - b._ordine; }).map(function(item) {
+    delete item._ordine; return item;
+  });
+}
+
+function riordinaCatalogo(prodotto, direzione, testMode) {
+  return conLock(function() {
+    const sheet = getCatalogoFoglio(testMode, true);
+    const catalogo = leggiRigheCatalogo(sheet);
+    const voce = trovaVoceCatalogo(catalogo, prodotto);
+    if (!voce) throw new Error('Prodotto catalogo non trovato.');
+    const gruppo = ordinaCatalogo(catalogo).filter(function(x) { return x.categoria === voce.categoria; });
+    const posizione = gruppo.findIndex(function(x) { return x.riga === voce.riga; });
+    const delta = (direzione === 'su' || direzione === 'up') ? -1 : 1;
+    const altra = gruppo[posizione + delta];
+    if (!altra) return { ok: true, catalogo: ordinaCatalogo(catalogo) };
+    const ordine = voce.ordine || (posizione + 1);
+    const altroOrdine = altra.ordine || (posizione + delta + 1);
+    sheet.getRange(voce.riga, 4).setValue(altroOrdine);
+    sheet.getRange(altra.riga, 4).setValue(ordine);
+    SpreadsheetApp.flush();
+    return { ok: true, catalogo: ordinaCatalogo(leggiRigheCatalogo(sheet)) };
+  });
+}
+
+function aggiungiProdottiMultipli(prodotti, aggiuntoDa, testMode) {
+  return conLock(function() {
+    const elenco = Array.isArray(prodotti) ? prodotti : [];
+    const sheet = getFoglio(testMode);
+    const catalogo = leggiCatalogo(testMode);
+    const oggi = Utilities.formatDate(new Date(), 'Europe/Rome', 'dd/MM/yyyy');
+    const nuove = [], duplicati = [];
+    elenco.forEach(function(nome) {
+      const voce = trovaVoceCatalogo(catalogo, nome);
+      const canonico = voce ? voce.prodotto : parseInput(nome).prodotto;
+      if (trovaProdotto(sheet, canonico)) {
+        if (duplicati.indexOf(canonico) < 0) duplicati.push(canonico);
+      } else {
+        nuove.push([canonico, 1, oggi, aggiuntoDa || '']);
+      }
+    });
+    if (nuove.length) sheet.getRange(sheet.getLastRow() + 1, 1, nuove.length, 4).setValues(nuove);
+    if (nuove.length) SpreadsheetApp.flush();
+    return { ok: true, aggiunti: nuove.length, duplicati: duplicati,
+      messaggio: creaMessaggioImportazione(nuove.length, 0, duplicati) };
+  });
 }
 
 function categoriaPerProdotto(prodotto, catalogo) {
@@ -493,14 +596,13 @@ function migraRimuoviColonnaStato(testMode) {
 }
 
 function parseInput(input) {
-  const testo = input.trim();
-  let quantita = 1;
-  let prodotto = testo;
-  const match = testo.match(/^(\d+)\s+(.+)$/);
-
-  if (match) {
-    quantita = parseInt(match[1], 10);
-    prodotto = match[2];
+  const testo = String(input || '').trim().replace(/\s+/g, ' ');
+  let quantita = 1, prodotto = testo;
+  let match = testo.match(/^(.+?)\s+x\s+(\d+|[a-zàèéìòù]+)$/i);
+  if (match) { quantita = parseQuantitaItaliana(match[2]); if (quantita !== null) prodotto = match[1]; else quantita = 1; }
+  else {
+    match = testo.match(/^(\d+|[a-zàèéìòù]+)\s+(.+)$/i);
+    if (match) { const valore = parseQuantitaItaliana(match[1]); if (valore !== null) { quantita = valore; prodotto = match[2]; } }
   }
 
   prodotto = prodotto.trim().replace(/\s+/g, ' ');
@@ -520,6 +622,11 @@ function parseRigaImportazione(riga) {
   const testo = String(riga || '').trim().replace(/\s+/g, ' ');
   if (!testo) return null;
 
+  const xMatch = testo.match(/^(.+?)\s+x\s+(\d+|[a-zàèéìòù]+)$/i);
+  if (xMatch) {
+    const xQuantita = parseQuantitaItaliana(xMatch[2]);
+    if (xQuantita !== null) return { prodotto: titoloProdotto(xMatch[1]), quantita: xQuantita };
+  }
   const parti = testo.split(' ');
   let quantita = parseQuantitaItaliana(parti[0]);
   let indiceQuantita = quantita !== null && parti.length > 1 ? 0 : -1;
@@ -532,9 +639,12 @@ function parseRigaImportazione(riga) {
   if (indiceQuantita < 0) quantita = 1;
   else parti.splice(indiceQuantita, 1);
 
-  let prodotto = parti.join(' ').trim().replace(/\s+/g, ' ');
-  prodotto = prodotto.charAt(0).toUpperCase() + prodotto.slice(1);
-  return { prodotto: prodotto, quantita: quantita };
+  return { prodotto: titoloProdotto(parti.join(' ')), quantita: quantita };
+}
+
+function titoloProdotto(prodotto) {
+  const testo = String(prodotto || '').trim().replace(/\s+/g, ' ');
+  return testo ? testo.charAt(0).toUpperCase() + testo.slice(1) : testo;
 }
 
 function parseQuantitaItaliana(valore) {

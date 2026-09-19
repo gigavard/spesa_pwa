@@ -103,7 +103,7 @@ class FakeSheet {
 function loadAppsScript({
   listaRows,
   storicoRows = [['Prodotto', 'Quantità', 'Data']],
-  catalogoRows = [['Prodotto', 'Categoria', 'Varianti']],
+  catalogoRows = [['Prodotto', 'Categoria', 'Varianti', 'Ordine']],
   testListaRows = [['Prodotto', 'Quantità', 'Data', 'Autore']],
   testStoricoRows = [['Prodotto', 'Quantità', 'Data']]
 }) {
@@ -313,7 +313,38 @@ test('REQ-IMPORT-001: import parser recognizes quantities at either end from one
   ]);
 });
 
-test('REQ-IMPORT-001: bulk import keeps existing metadata and applies maximum duplicate quantity', () => {
+test('catalog parser recognizes leading words, digits and suffix x', () => {
+  const app = loadAppsScript({ listaRows: [['Prodotto', 'Quantità', 'Data', 'Autore']] });
+  const parse = app.getFunction('parseInput');
+  for (const [input, prodotto, quantita] of [['due latte', 'Latte', 2], ['2 latte', 'Latte', 2], ['latte x 2', 'Latte', 2], ['dieci mele', 'Mele', 10]]) {
+    const actual = parse(input); assert.equal(actual.prodotto, prodotto); assert.equal(actual.quantita, quantita);
+  }
+});
+
+test('catalog canonical product and category are reused for similar names', () => {
+  const app = loadAppsScript({ catalogoRows: [
+    ['Prodotto', 'Categoria', 'Varianti', 'Ordine'],
+    ['Banane', 'Frutta e verdura', '', 1]
+  ], listaRows: [['Prodotto', 'Quantità', 'Data', 'Autore']] });
+  const result = app.getFunction('aggiungiProdotto')('banana', 'Giulio');
+  assert.equal(result.ok, true);
+  assert.equal(result.prodotto, 'Banane');
+  assert.deepEqual(app.lista.rows[1], ['Banane', 1, '18/09/2026', 'Giulio']);
+});
+
+test('catalog reorder swaps configured order', () => {
+  const app = loadAppsScript({ catalogoRows: [
+    ['Prodotto', 'Categoria', 'Varianti', 'Ordine'],
+    ['Latte', 'Colazione', '', 1],
+    ['Biscotti', 'Colazione', '', 2]
+  ], listaRows: [['Prodotto', 'Quantità', 'Data', 'Autore']] });
+  app.getFunction('riordinaCatalogo')('Biscotti', 'su', false);
+  const catalogo = app.getFunction('leggiCatalogo')(false);
+  assert.equal(catalogo.find(x => x.prodotto === 'Biscotti').ordine, 1);
+  assert.equal(catalogo.find(x => x.prodotto === 'Latte').ordine, 2);
+});
+
+test('REQ-IMPORT-001: bulk import keeps existing metadata and blocks duplicates', () => {
   const app = loadAppsScript({
     listaRows: [
       ['Prodotto', 'Quantità', 'Data', 'Autore'],
@@ -332,16 +363,15 @@ test('REQ-IMPORT-001: bulk import keeps existing metadata and applies maximum du
     'scottex'
   ].join('\n'), 'Alice');
 
-  assert.deepEqual({ ...result }, {
-    ok: true,
-    aggiunti: 2,
-    aggiornati: 1,
-    giaPresenti: 2,
-    messaggio: '2 aggiunti, 1 aggiornati, 2 già presenti.'
-  });
+  assert.equal(result.ok, true);
+  assert.equal(result.aggiunti, 2);
+  assert.equal(result.aggiornati, 0);
+  assert.equal(result.giaPresenti, 2);
+  assert.equal(Array.from(result.duplicati).join(','), 'Banane,Latte');
+  assert.equal(result.messaggio, '2 aggiunti, 2 già presenti. Non inseriti: Banane, Latte.');
   assert.deepEqual(app.lista.rows, [
     ['Prodotto', 'Quantità', 'Data', 'Autore'],
-    ['Banane', 5, '17/09/2026', 'Giulio'],
+    ['Banane', 4, '17/09/2026', 'Giulio'],
     ['Latte', 2, '16/09/2026', 'Alice'],
     ['Mele', 5, '18/09/2026', 'Alice'],
     ['Scottex', 1, '18/09/2026', 'Alice']

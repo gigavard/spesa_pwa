@@ -23,7 +23,10 @@
     .categoria-sezione { margin-top: 22px; font-size: 19px; color: #444; }
     .categoria-sezione:first-child { margin-top: 0; }
     .nome-prodotto { flex: 1; font-size: 21px; overflow-wrap: anywhere; }
-    .selettore-categoria { max-width: 145px; padding: 8px 4px; font-size: 15px; }
+    .catalogo-riga { display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid #ddd; }
+    .catalogo-riga .nome-prodotto { font-size:18px; }
+    .catalogo-riga select { max-width:150px; padding:6px; }
+    .catalogo-riga button { width:36px; height:36px; }
     .quantita { min-width: 28px; text-align: center; font-size: 20px; font-weight: bold; }
     .azione { width: 42px; height: 42px; border: none; border-radius: 8px; font-size: 22px; cursor: pointer; }
     .azione:disabled, .add-button:disabled, .voice-button:disabled, .azione-principale:disabled, .azione-secondaria:disabled { opacity: .45; cursor: default; }
@@ -92,6 +95,7 @@
   </div>
 
   <button id="btnApriImport" class="azione-secondaria import-open" type="button">📋 Importa note</button>
+  <button id="btnListaProdotti" class="azione-secondaria import-open" type="button">🧺 Lista prodotti</button>
   <section id="pannelloImport" class="import-panel" aria-labelledby="titoloImport" hidden>
     <label id="titoloImport" for="testoImport">Incolla la lista, un prodotto per riga</label>
     <textarea id="testoImport" placeholder="2 banane morbide&#10;detersivo per piatti&#10;fagioli scatola tre"></textarea>
@@ -102,6 +106,15 @@
     <div id="riepilogoImport" aria-live="polite"></div>
     <div id="anteprimaImport" class="anteprima-import"></div>
     <button id="btnConfermaImport" class="azione-principale import-confirm" type="button" hidden>Importa nella lista</button>
+  </section>
+  <section id="pannelloCategorie" class="import-panel" hidden>
+    <label>Assegna categoria ai nuovi prodotti</label>
+    <div id="listaCategorieNuove"></div>
+    <div class="import-actions"><button id="btnConfermaCategorie" type="button">Conferma</button><button id="btnAnnullaCategorie" type="button">Annulla</button></div>
+  </section>
+  <section id="pannelloListaProdotti" class="import-panel" hidden>
+    <label>Lista prodotti</label><div id="listaCatalogoSelezione"></div>
+    <div class="import-actions"><button id="btnConfermaListaProdotti" type="button">Aggiungi selezionati</button><button id="btnAnnullaListaProdotti" type="button">Annulla</button></div>
   </section>
 
   <div id="lista"></div>
@@ -131,11 +144,13 @@
         TEST_MODE
       </label>
       <a id="linkGoogleSheet" class="sheet-link" target="_blank" rel="noopener noreferrer">Apri il Google Sheet in uso</a>
+      <h2>Catalogo prodotti</h2>
+      <div id="adminCatalogo"></div>
     </div>
   </main>
 
 <script>
-const API = 'https://script.google.com/macros/s/AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6/exec';
+const API = 'https://script.google.com/macros/s/AKfycbwuQxLdzCqONyk6_34su8GlN7kbIZ33T35YH4EHyrL1Sc8SX5IwRBMS1HQfSOr8S9r9/exec';
 const SHEET_URLS = {
   produzione: 'https://docs.google.com/spreadsheets/d/1KV6cHvvtuRLwFsmSdnSod44_Vc0ElEoAZEIoLUj-YHA/edit',
   test: 'https://docs.google.com/spreadsheets/d/1uW9phsPDSAuMz2mEOCJVQy5rtBPTdUbD7qH6cx-NejQ/edit'
@@ -148,6 +163,7 @@ let callbackCounter = 0;
 let utenteCorrente = localStorage.getItem('utenteSpesa');
 let testMode = localStorage.getItem('testModeSpesa') === 'true';
 let listaCorrente = [];
+let catalogoCorrente = [];
 let prodottiPresi = caricaProdottiPresi();
 let schermataCorrente = 'ordini';
 let operazioneInCorso = false;
@@ -159,6 +175,7 @@ let risultatoVocaleRicevuto = false;
 let erroreVocaleRicevuto = false;
 let testoImportAnalizzato = '';
 let elementiImportAnalizzati = [];
+let richiesteCategoria = [];
 
 if (!utenteCorrente) document.getElementById('sceltaUtente').style.display = 'block';
 aggiornaUtenteUI();
@@ -402,13 +419,14 @@ function setBusy(busy) {
   document.getElementById('btnChiudi').disabled = busy;
   document.getElementById('btnPulisci').disabled = busy;
   document.getElementById('btnApriImport').disabled = busy;
+  document.getElementById('btnListaProdotti').disabled = busy;
   document.getElementById('testoImport').disabled = busy;
   document.getElementById('btnAnalizzaImport').disabled = busy;
   document.getElementById('btnAnnullaImport').disabled = busy;
   document.getElementById('btnConfermaImport').disabled = busy;
   document.querySelectorAll('.azione').forEach(btn => btn.disabled = busy);
   document.querySelectorAll('.azione-preso').forEach(btn => btn.disabled = busy || btn.closest('.riga-prodotto').classList.contains('preso'));
-  document.querySelectorAll('.selettore-categoria').forEach(select => select.disabled = busy);
+  document.querySelectorAll('#pannelloCategorie select, #adminCatalogo select, #adminCatalogo button, #pannelloListaProdotti input, #pannelloListaProdotti button').forEach(control => control.disabled = busy);
   document.getElementById('testMode').disabled = busy;
   aggiornaPulsanteVoce();
 }
@@ -450,14 +468,19 @@ async function leggiLista() {
   if (!dati.ok) throw new Error(dati.messaggio || 'Errore');
   return dati.lista || [];
 }
+async function leggiCatalogo() {
+  const dati = await jsonp({ action: 'catalogo' });
+  if (!dati.ok) throw new Error(dati.messaggio || 'Errore catalogo');
+  return dati.catalogo || [];
+}
 
 async function caricaLista() {
   const mioToken = ++reconcileToken;
   try {
-    let nuovaLista;
+    let nuovaLista, nuovoCatalogo;
     for (let tentativo = 0; tentativo < 3; tentativo++) {
       try {
-        nuovaLista = await leggiLista();
+        [nuovaLista, nuovoCatalogo] = await Promise.all([leggiLista(), leggiCatalogo()]);
         break;
       } catch (error) {
         if (tentativo === 2) throw error;
@@ -466,7 +489,9 @@ async function caricaLista() {
     }
     if (mioToken !== reconcileToken) return listaCorrente;
     listaCorrente = nuovaLista;
+    catalogoCorrente = nuovoCatalogo || catalogoCorrente;
     mostraLista(listaCorrente);
+    mostraAdminCatalogo();
     return listaCorrente;
   } catch (error) {
     mostraErrore(error);
@@ -498,19 +523,6 @@ function mostraLista(lista) {
     nome.className = 'nome-prodotto';
     nome.textContent = item.prodotto;
 
-    const categoria = document.createElement('select');
-    categoria.className = 'selettore-categoria';
-    categoria.setAttribute('aria-label', `Categoria ${item.prodotto}`);
-    CATEGORIE.forEach(nomeCategoria => {
-      const opzione = document.createElement('option');
-      opzione.value = nomeCategoria;
-      opzione.textContent = nomeCategoria;
-      opzione.selected = (item.categoria || 'Altro') === nomeCategoria;
-      categoria.appendChild(opzione);
-    });
-    categoria.disabled = operazioneInCorso;
-    categoria.onchange = () => cambiaCategoria(item, categoria.value);
-
     const meno = document.createElement('button');
     meno.className = 'azione';
     meno.textContent = '−';
@@ -533,7 +545,7 @@ function mostraLista(lista) {
     cestino.disabled = operazioneInCorso;
     cestino.onclick = () => rimuovi(item);
 
-    riga.append(nome, categoria, meno, quantita, piu, cestino);
+    riga.append(nome, meno, quantita, piu, cestino);
     contenitore.appendChild(riga);
     });
   });
@@ -619,6 +631,48 @@ function mostraListaAcquisti(lista) {
     contenitore.appendChild(riga);
     });
   });
+}
+
+function mostraAdminCatalogo() {
+  const contenitore = document.getElementById('adminCatalogo'); if (!contenitore) return;
+  contenitore.replaceChildren();
+  const gruppi = new Map(CATEGORIE.map(c => [c, []]));
+  catalogoCorrente.forEach(v => (gruppi.get(v.categoria) || gruppi.get('Altro')).push(v));
+  CATEGORIE.forEach(cat => {
+    const items = gruppi.get(cat); if (!items || !items.length) return;
+    const h = document.createElement('h3'); h.textContent = cat; contenitore.appendChild(h);
+    items.forEach(item => {
+      const r = document.createElement('div'); r.className = 'catalogo-riga';
+      const n = document.createElement('span'); n.className = 'nome-prodotto'; n.textContent = item.prodotto;
+      const s = document.createElement('select'); CATEGORIE.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; s.appendChild(o); }); s.value = item.categoria;
+      s.onchange = () => cambiaCategoriaCatalogo(item, s.value);
+      const su = document.createElement('button'); su.textContent = '↑'; su.onclick = () => riordinaCatalogoClient(item, 'su');
+      const giu = document.createElement('button'); giu.textContent = '↓'; giu.onclick = () => riordinaCatalogoClient(item, 'giu');
+      r.append(n, s, su, giu); contenitore.appendChild(r);
+    });
+  });
+}
+
+async function cambiaCategoriaCatalogo(item, categoria) {
+  try { await postSenzaCors({ action: 'categoria', prodotto: item.prodotto, categoria }); catalogoCorrente = await leggiCatalogo(); mostraAdminCatalogo(); mostraLista(listaCorrente); } catch (e) { mostraErrore(e); }
+}
+async function riordinaCatalogoClient(item, direzione) {
+  try { await postSenzaCors({ action: 'riordinaCatalogo', prodotto: item.prodotto, direzione }); catalogoCorrente = await leggiCatalogo(); mostraAdminCatalogo(); mostraLista(listaCorrente); } catch (e) { mostraErrore(e); }
+}
+
+function apriListaProdotti() {
+  const contenitore = document.getElementById('listaCatalogoSelezione'); contenitore.replaceChildren();
+  CATEGORIE.forEach(cat => {
+    const items = catalogoCorrente.filter(x => x.categoria === cat); if (!items.length) return;
+    const h = document.createElement('h3'); h.textContent = cat; contenitore.appendChild(h);
+    items.forEach(item => { const r = document.createElement('label'); r.className = 'catalogo-riga'; const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = item.prodotto; r.append(cb, document.createTextNode(item.prodotto)); contenitore.appendChild(r); });
+  });
+  document.getElementById('pannelloListaProdotti').hidden = false;
+}
+async function confermaListaProdotti() {
+  const prodotti = Array.from(document.querySelectorAll('#listaCatalogoSelezione input:checked')).map(x => x.value); if (!prodotti.length) return;
+  const duplicati = prodotti.filter(p => trovaInLista(listaCorrente, p)).map(p => (trovaInLista(listaCorrente, p) || {}).prodotto);
+  setBusy(true); try { await postSenzaCors({ action: 'aggiungiMultipli', prodotti, utente: utenteCorrente }); document.getElementById('messaggio').textContent = duplicati.length ? `Già presenti: ${duplicati.join(', ')}.` : `${prodotti.length} prodotti aggiunti.`; } catch (e) { mostraErrore(e); } finally { document.getElementById('pannelloListaProdotti').hidden = true; setBusy(false); riconciliaInBackground(); }
 }
 
 function segnaPreso(prodotto) {
@@ -756,12 +810,19 @@ async function aggiungi() {
   }
 
   const parsed = parseInputClient(testo);
+  const voce = trovaVoceCatalogoClient(parsed.prodotto);
+  if (voce) parsed.prodotto = voce.prodotto;
   const giaPresente = trovaInLista(listaCorrente, parsed.prodotto);
   if (giaPresente) {
     messaggio.textContent = `${giaPresente.prodotto} è già presente in quantità ${giaPresente.quantita}.`;
     return;
   }
 
+  if (!voce) {
+    const categorie = await scegliCategorie([{ prodotto: parsed.prodotto }]);
+    if (!categorie) return;
+    await salvaCategorie(categorie);
+  }
   setBusy(true);
   aggiungiLocale(parsed.prodotto, parsed.quantita);
   input.value = '';
@@ -777,6 +838,35 @@ async function aggiungi() {
     if (!input.disabled) input.focus();
     riconciliaInBackground();
   }
+}
+
+function trovaVoceCatalogoClient(prodotto) {
+  const key = normalizzaClient(prodotto);
+  let voce = catalogoCorrente.find(item => normalizzaClient(item.prodotto) === key || (item.varianti || []).some(v => normalizzaClient(v) === key));
+  if (voce) return voce;
+  const simili = catalogoCorrente.filter(item => [item.prodotto, ...(item.varianti || [])].some(nome => nomiProdottiSimiliClient(nome, prodotto)));
+  return simili.length === 1 ? simili[0] : null;
+}
+
+function scegliCategorie(prodotti) {
+  return new Promise(resolve => {
+    const contenitore = document.getElementById('listaCategorieNuove'); contenitore.replaceChildren();
+    prodotti.forEach(item => {
+      const riga = document.createElement('div'); riga.className = 'catalogo-riga';
+      const nome = document.createElement('span'); nome.className = 'nome-prodotto'; nome.textContent = item.prodotto;
+      const select = document.createElement('select');
+      CATEGORIE.forEach(cat => { const o = document.createElement('option'); o.value = cat; o.textContent = cat; select.appendChild(o); });
+      select.value = 'Altro'; riga.append(nome, select); contenitore.appendChild(riga); item._select = select;
+    });
+    document.getElementById('pannelloCategorie').hidden = false;
+    document.getElementById('btnConfermaCategorie').onclick = () => { document.getElementById('pannelloCategorie').hidden = true; resolve(prodotti.map(x => ({ prodotto: x.prodotto, categoria: x._select.value }))); };
+    document.getElementById('btnAnnullaCategorie').onclick = () => { document.getElementById('pannelloCategorie').hidden = true; resolve(null); };
+  });
+}
+
+async function salvaCategorie(categorie) {
+  for (const item of categorie) await postSenzaCors({ action: 'categoria', prodotto: item.prodotto, categoria: item.categoria });
+  try { catalogoCorrente = await leggiCatalogo(); } catch (_) {}
 }
 
 function apriImportazione() {
@@ -873,13 +963,20 @@ async function confermaImportazione() {
   const elementiDaImportare = elementiImportAnalizzati.slice();
   const gruppi = raggruppaImportazioneClient(elementiDaImportare);
   const esistenti = new Set(listaCorrente.map(item => normalizzaClient(item.prodotto)));
-  const nuovi = gruppi.filter(item => !esistenti.has(item.chiave)).length;
-  const giaPresenti = gruppi.length - nuovi;
+  const sconosciuti = gruppi.filter(item => !trovaVoceCatalogoClient(item.prodotto));
+  if (sconosciuti.length) {
+    const categorie = await scegliCategorie(sconosciuti.map(x => ({ prodotto: x.prodotto })));
+    if (!categorie) return;
+    await salvaCategorie(categorie);
+  }
+  const duplicatiNomi = gruppi.filter(item => esistenti.has(normalizzaClient((trovaVoceCatalogoClient(item.prodotto) || item).prodotto))).map(item => (trovaVoceCatalogoClient(item.prodotto) || item).prodotto);
+  const nuovi = gruppi.length - duplicatiNomi.length;
+  const giaPresenti = duplicatiNomi.length;
 
   setBusy(true);
-  applicaImportLocale(elementiDaImportare);
+  gruppi.forEach(item => { const voce = trovaVoceCatalogoClient(item.prodotto); if (!trovaInLista(listaCorrente, voce ? voce.prodotto : item.prodotto)) listaCorrente.push({ prodotto: voce ? voce.prodotto : item.prodotto, quantita: item.quantita, categoria: voce ? voce.categoria : 'Altro' }); });
   document.getElementById('messaggio').textContent =
-    `${nuovi} aggiunti, ${giaPresenti} già presenti.`;
+    `${nuovi} aggiunti, ${giaPresenti} già presenti${giaPresenti ? ': ' + duplicatiNomi.join(', ') : ''}.`;
 
   try {
     await postSenzaCors({ action: 'importa', testo: testoDaInviare, utente: utenteCorrente });
@@ -944,14 +1041,11 @@ async function confermaPulisciStorico() {
 }
 
 function parseInputClient(input) {
-  const testo = input.trim();
-  const match = testo.match(/^(\d+)\s+(.+)$/);
-  let quantita = 1;
-  let prodotto = testo;
-  if (match) {
-    quantita = parseInt(match[1], 10);
-    prodotto = match[2];
-  }
+  const testo = String(input || '').trim().replace(/\s+/g, ' ');
+  let quantita = 1, prodotto = testo;
+  let match = testo.match(/^(.+?)\s+x\s+(\d+|[a-zàèéìòù]+)$/i);
+  if (match) { const q = parseQuantitaItalianaClient(match[2]); if (q !== null) { quantita = q; prodotto = match[1]; } }
+  else { match = testo.match(/^(\d+|[a-zàèéìòù]+)\s+(.+)$/i); if (match) { const q = parseQuantitaItalianaClient(match[1]); if (q !== null) { quantita = q; prodotto = match[2]; } } }
   prodotto = prodotto.trim().replace(/\s+/g, ' ');
   prodotto = prodotto.charAt(0).toUpperCase() + prodotto.slice(1);
   return { prodotto, quantita };
@@ -968,6 +1062,8 @@ function parseRigaImportazioneClient(riga) {
   const testo = String(riga || '').trim().replace(/\s+/g, ' ');
   if (!testo) return null;
 
+  const xMatch = testo.match(/^(.+?)\s+x\s+(\d+|[a-zàèéìòù]+)$/i);
+  if (xMatch) { const q = parseQuantitaItalianaClient(xMatch[2]); if (q !== null) return { prodotto: xMatch[1].charAt(0).toUpperCase() + xMatch[1].slice(1), quantita: q }; }
   const parti = testo.split(' ');
   let quantita = parseQuantitaItalianaClient(parti[0]);
   let indiceQuantita = quantita !== null && parti.length > 1 ? 0 : -1;
@@ -1069,6 +1165,9 @@ document.getElementById('btnApriImport').addEventListener('click', apriImportazi
 document.getElementById('btnAnalizzaImport').addEventListener('click', analizzaImportazione);
 document.getElementById('btnAnnullaImport').addEventListener('click', annullaImportazione);
 document.getElementById('btnConfermaImport').addEventListener('click', confermaImportazione);
+document.getElementById('btnListaProdotti').addEventListener('click', apriListaProdotti);
+document.getElementById('btnConfermaListaProdotti').addEventListener('click', confermaListaProdotti);
+document.getElementById('btnAnnullaListaProdotti').addEventListener('click', () => { document.getElementById('pannelloListaProdotti').hidden = true; });
 document.getElementById('testoImport').addEventListener('input', invalidaAnalisiImportazione);
 document.getElementById('btnAcquisti').addEventListener('click', () => mostraSchermata('acquisti'));
 document.getElementById('btnAdmin').addEventListener('click', () => mostraSchermata('admin'));
