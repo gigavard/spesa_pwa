@@ -378,7 +378,7 @@ function assegnaCategoria(prodotto, categoria, testMode) {
       : null;
     if (!categoriaValida) throw new Error('Categoria non valida.');
 
-    const catalogo = getCatalogoFoglio(testMode);
+    const catalogo = getCatalogoFoglio(testMode, true);
     const target = normalizza(prodotto);
     if (!target) throw new Error('Prodotto non valido.');
     const dati = leggiRigheCatalogo(catalogo);
@@ -398,10 +398,13 @@ function getFoglio(testMode) {
   return sheet;
 }
 
-function getCatalogoFoglio(testMode) {
+function getCatalogoFoglio(testMode, giaBloccato) {
   const ss = getSpreadsheet(testMode);
   let sheet = ss.getSheetByName(NOME_CATALOGO);
   if (!sheet) {
+    if (!giaBloccato) {
+      return conLock(function() { return getCatalogoFoglio(testMode, true); });
+    }
     sheet = ss.insertSheet(NOME_CATALOGO);
     sheet.getRange(1, 1, 1, 3).setValues([['Prodotto', 'Categoria', 'Varianti']]);
     SpreadsheetApp.flush();
