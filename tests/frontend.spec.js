@@ -17,7 +17,8 @@ test('ORDINI, ACQUISTI and ADMIN keep their responsibilities separate', async ({
         body: `${callback}(${JSON.stringify({ ok: true, lista })});`
       });
     }
-    posts.push(JSON.parse(request.postData() || '{}'));
+    const data = JSON.parse(request.postData() || '{}');
+    posts.push(data);
     return route.fulfill({ status: 200, body: '' });
   });
 
@@ -124,6 +125,44 @@ test('TEST_MODE fails closed when the backend cannot confirm ListaSpesaTest', as
   await expect(page.locator('#testMode')).not.toBeChecked();
   await expect(page.locator('#linkGoogleSheet')).toHaveText('Apri ListaSpesa');
   expect(posts).toEqual([]);
+});
+
+test('ORDINI and ACQUISTI group products by the configured category order', async ({ page }) => {
+  const lista = [
+    { prodotto: 'Pane', quantita: 1, categoria: 'Pane' },
+    { prodotto: 'Latte', quantita: 1, categoria: 'Banco frigo' },
+    { prodotto: 'Banane', quantita: 2, categoria: 'Frutta e verdura' }
+  ];
+  const posts = [];
+  await page.route('https://script.google.com/**', async route => {
+    const request = route.request();
+    if (request.method() === 'GET') {
+      const callback = new URL(request.url()).searchParams.get('callback');
+      return route.fulfill({ contentType: 'application/javascript', body: `${callback}(${JSON.stringify({ ok: true, lista })});` });
+    }
+    const data = JSON.parse(request.postData() || '{}');
+    posts.push(data);
+    if (data.action === 'categoria') {
+      const item = lista.find(elemento => elemento.prodotto === data.prodotto);
+      if (item) item.categoria = data.categoria;
+    }
+    return route.fulfill({ status: 200, body: '' });
+  });
+
+  await page.goto('/');
+  await expect(page.locator('#lista .categoria-sezione')).toHaveText([
+    'Frutta e verdura', 'Banco frigo', 'Pane'
+  ]);
+  const banane = page.locator('#lista .riga-prodotto').filter({ hasText: 'Banane' });
+  await banane.locator('.selettore-categoria').selectOption('Colazione');
+  await expect.poll(() => posts).toHaveLength(1);
+  expect(posts[0]).toMatchObject({ action: 'categoria', prodotto: 'Banane', categoria: 'Colazione', testMode: false });
+
+  await page.locator('#btnAcquisti').click();
+  await expect(page.locator('#listaAcquisti .categoria-sezione')).toHaveText([
+    'Banco frigo', 'Colazione', 'Pane'
+  ]);
+  await expect(page.locator('#listaAcquisti .selettore-categoria')).toHaveCount(0);
 });
 
 test('initial list read recovers from a transient backend failure without reload', async ({ page }) => {

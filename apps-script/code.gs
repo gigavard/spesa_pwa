@@ -1,6 +1,11 @@
 const NOME_LISTA = 'Lista Spesa';
 const NOME_STORICO = 'Storico';
+const NOME_CATALOGO = 'Catalogo prodotti';
 const TEST_SPREADSHEET_ID = '1uW9phsPDSAuMz2mEOCJVQy5rtBPTdUbD7qH6cx-NejQ';
+const CATEGORIE = [
+  'Frutta e verdura', 'Banco frigo', 'Colazione', 'Scatole e barattoli',
+  'Bevande', 'Bagno e igiene', 'Casa', 'Salumi', 'Pane', 'Surgelati', 'Altro'
+];
 
 function doGet(e) {
   const p = e && e.parameter ? e.parameter : {};
@@ -18,13 +23,18 @@ function doGet(e) {
         risposta = { ok: true, lista: getListaSpesa(isTestMode(p.testMode)) };
         break;
       case 'ambiente':
-        const testMode = isTestMode(p.testMode);
-        getSpreadsheet(testMode);
-        risposta = {
-          ok: true,
-          testMode: testMode,
-          spreadsheet: testMode ? 'ListaSpesaTest' : 'ListaSpesa'
-        };
+        {
+          const testMode = isTestMode(p.testMode);
+          getSpreadsheet(testMode);
+          risposta = {
+            ok: true,
+            testMode: testMode,
+            spreadsheet: testMode ? 'ListaSpesaTest' : 'ListaSpesa'
+          };
+        }
+        break;
+      case 'categorie':
+        risposta = { ok: true, categorie: CATEGORIE };
         break;
       default:
         risposta = { ok: false, messaggio: 'Azione GET non riconosciuta.' };
@@ -69,6 +79,9 @@ function doPost(e) {
         pulisciStorico(testMode);
         risposta = { ok: true };
         break;
+      case 'categoria':
+        risposta = assegnaCategoria(dati.prodotto, dati.categoria, testMode);
+        break;
       default:
         risposta = { ok: false, messaggio: 'Azione POST non riconosciuta.' };
     }
@@ -101,6 +114,7 @@ function apiResponse(dati, callback) {
 
 function getListaSpesa(testMode) {
   const sheet = getFoglio(testMode);
+  const catalogo = leggiCatalogo(testMode);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
@@ -113,7 +127,8 @@ function getListaSpesa(testMode) {
     if (prodotto) {
       lista.push({
         prodotto: String(prodotto),
-        quantita: quantita
+        quantita: quantita,
+        categoria: categoriaPerProdotto(prodotto, catalogo)
       });
     }
   }
@@ -168,27 +183,13 @@ function importaProdotti(testo, aggiuntoDa, testMode) {
     }
 
     const sheet = getFoglio(testMode);
-    const lastRow = sheet.getLastRow();
-    const valori = lastRow >= 2
-      ? sheet.getRange(2, 1, lastRow - 1, 4).getValues()
-      : [];
-    const esistenti = Object.create(null);
-
-    valori.forEach(function(riga, indice) {
-      if (!riga[0]) return;
-      esistenti[normalizza(riga[0])] = {
-        riga: indice + 2,
-        quantita: Number(riga[1]) || 1
-      };
-    });
-
     const oggi = Utilities.formatDate(new Date(), 'Europe/Rome', 'dd/MM/yyyy');
     const nuoveRighe = [];
     let aggiornati = 0;
     let giaPresenti = 0;
 
     elementi.forEach(function(elemento) {
-      const esistente = esistenti[elemento.chiave];
+      const esistente = trovaProdotto(sheet, elemento.prodotto);
       if (!esistente) {
         nuoveRighe.push([elemento.prodotto, elemento.quantita, oggi, aggiuntoDa || '']);
         return;
@@ -279,8 +280,18 @@ function trovaProdotto(sheet, prodottoCercato) {
       };
     }
   }
-
-  return null;
+  const simili = [];
+  for (let i = 0; i < valori.length; i++) {
+    const prodotto = valori[i][0];
+    if (prodotto && nomiProdottiSimili(prodotto, prodottoCercato)) {
+      simili.push({
+        riga: i + 2,
+        prodotto: String(prodotto),
+        quantita: Number(valori[i][1]) || 1
+      });
+    }
+  }
+  return simili.length === 1 ? simili[0] : null;
 }
 
 function trovaProdottoObbligatorio(sheet, prodotto) {
@@ -360,11 +371,85 @@ function pulisciStorico(testMode) {
   });
 }
 
+function assegnaCategoria(prodotto, categoria, testMode) {
+  return conLock(function() {
+    const categoriaValida = CATEGORIE.indexOf(String(categoria || '').trim()) >= 0
+      ? String(categoria).trim()
+      : null;
+    if (!categoriaValida) throw new Error('Categoria non valida.');
+
+    const catalogo = getCatalogoFoglio(testMode);
+    const target = normalizza(prodotto);
+    if (!target) throw new Error('Prodotto non valido.');
+    const dati = leggiRigheCatalogo(catalogo);
+    const voce = trovaVoceCatalogo(dati, prodotto);
+
+    if (!voce) catalogo.appendRow([String(prodotto).trim(), categoriaValida, '']);
+    else catalogo.getRange(voce.riga, 2).setValue(categoriaValida);
+    SpreadsheetApp.flush();
+    return { ok: true, prodotto: String(prodotto).trim(), categoria: categoriaValida };
+  });
+}
+
 function getFoglio(testMode) {
   const ss = getSpreadsheet(testMode);
   const sheet = ss.getSheetByName(NOME_LISTA);
   if (!sheet) throw new Error('Foglio "Lista Spesa" non trovato');
   return sheet;
+}
+
+function getCatalogoFoglio(testMode) {
+  const ss = getSpreadsheet(testMode);
+  let sheet = ss.getSheetByName(NOME_CATALOGO);
+  if (!sheet) {
+    sheet = ss.insertSheet(NOME_CATALOGO);
+    sheet.getRange(1, 1, 1, 3).setValues([['Prodotto', 'Categoria', 'Varianti']]);
+    SpreadsheetApp.flush();
+  }
+  return sheet;
+}
+
+function leggiRigheCatalogo(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  return sheet.getRange(2, 1, lastRow - 1, 3).getValues()
+    .map(function(riga, indice) {
+      return {
+        riga: indice + 2,
+        prodotto: String(riga[0] || '').trim(),
+        categoria: CATEGORIE.indexOf(String(riga[1] || '').trim()) >= 0
+          ? String(riga[1]).trim() : 'Altro',
+        varianti: String(riga[2] || '').split(';').map(function(item) {
+          return item.trim();
+        }).filter(Boolean)
+      };
+    }).filter(function(voce) { return voce.prodotto; });
+}
+
+function leggiCatalogo(testMode) {
+  return leggiRigheCatalogo(getCatalogoFoglio(testMode));
+}
+
+function categoriaPerProdotto(prodotto, catalogo) {
+  const voce = trovaVoceCatalogo(catalogo, prodotto);
+  return voce ? voce.categoria : 'Altro';
+}
+
+function trovaVoceCatalogo(catalogo, prodotto) {
+  const target = normalizza(prodotto);
+  if (!target) return null;
+  for (let i = 0; i < catalogo.length; i++) {
+    const voce = catalogo[i];
+    if (normalizza(voce.prodotto) === target || voce.varianti.some(function(variante) {
+      return normalizza(variante) === target;
+    })) return voce;
+  }
+  const simili = catalogo.filter(function(voce) {
+    return [voce.prodotto].concat(voce.varianti).some(function(nome) {
+      return nomiProdottiSimili(nome, prodotto);
+    });
+  });
+  return simili.length === 1 ? simili[0] : null;
 }
 
 function getSpreadsheet(testMode) {
@@ -494,16 +579,20 @@ function raggruppaImportazione(elementi) {
   elementi.forEach(function(elemento) {
     const chiave = normalizza(elemento.prodotto);
     if (!chiave) return;
-    if (!perChiave[chiave]) {
-      perChiave[chiave] = {
-        chiave: chiave,
+    const gruppoSimile = gruppi.find(function(gruppo) {
+      return nomiProdottiSimili(gruppo.prodotto, elemento.prodotto);
+    });
+    const chiaveGruppo = gruppoSimile ? gruppoSimile.chiave : chiave;
+    if (!perChiave[chiaveGruppo]) {
+      perChiave[chiaveGruppo] = {
+        chiave: chiaveGruppo,
         prodotto: elemento.prodotto,
         quantita: elemento.quantita
       };
-      gruppi.push(perChiave[chiave]);
+      gruppi.push(perChiave[chiaveGruppo]);
       return;
     }
-    perChiave[chiave].quantita = Math.max(perChiave[chiave].quantita, elemento.quantita);
+    perChiave[chiaveGruppo].quantita = Math.max(perChiave[chiaveGruppo].quantita, elemento.quantita);
   });
 
   return gruppi;
@@ -512,7 +601,33 @@ function raggruppaImportazione(elementi) {
 function normalizza(testo) {
   return String(testo || '')
     .trim()
+    .replace(/\s+/g, ' ')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
+}
+
+function nomiProdottiSimili(primo, secondo) {
+  const a = normalizza(primo);
+  const b = normalizza(secondo);
+  if (a.length < 5 || b.length < 5) return false;
+  if (a === b) return true;
+  if (a.slice(0, 3) !== b.slice(0, 3)) return false;
+  return distanzaLevenshtein(a, b) <= 1;
+}
+
+function distanzaLevenshtein(a, b) {
+  const riga = Array.from({ length: b.length + 1 }, function(_, i) { return i; });
+  for (let i = 1; i <= a.length; i++) {
+    let diagonale = riga[0];
+    riga[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const sopra = riga[j];
+      riga[j] = a[i - 1] === b[j - 1]
+        ? diagonale
+        : Math.min(diagonale + 1, sopra + 1, riga[j - 1] + 1);
+      diagonale = sopra;
+    }
+  }
+  return riga[b.length];
 }

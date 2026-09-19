@@ -20,7 +20,10 @@
     #messaggio { margin-top: 16px; min-height: 24px; font-size: 18px; }
     #lista { margin-top: 28px; }
     .riga-prodotto { display: flex; align-items: center; gap: 8px; padding: 12px 0; border-bottom: 1px solid #ddd; }
+    .categoria-sezione { margin-top: 22px; font-size: 19px; color: #444; }
+    .categoria-sezione:first-child { margin-top: 0; }
     .nome-prodotto { flex: 1; font-size: 21px; overflow-wrap: anywhere; }
+    .selettore-categoria { max-width: 145px; padding: 8px 4px; font-size: 15px; }
     .quantita { min-width: 28px; text-align: center; font-size: 20px; font-weight: bold; }
     .azione { width: 42px; height: 42px; border: none; border-radius: 8px; font-size: 22px; cursor: pointer; }
     .azione:disabled, .add-button:disabled, .voice-button:disabled, .azione-principale:disabled, .azione-secondaria:disabled { opacity: .45; cursor: default; }
@@ -137,6 +140,10 @@ const SHEET_URLS = {
   produzione: 'https://docs.google.com/spreadsheets/d/1KV6cHvvtuRLwFsmSdnSod44_Vc0ElEoAZEIoLUj-YHA/edit',
   test: 'https://docs.google.com/spreadsheets/d/1uW9phsPDSAuMz2mEOCJVQy5rtBPTdUbD7qH6cx-NejQ/edit'
 };
+const CATEGORIE = [
+  'Frutta e verdura', 'Banco frigo', 'Colazione', 'Scatole e barattoli',
+  'Bevande', 'Bagno e igiene', 'Casa', 'Salumi', 'Pane', 'Surgelati', 'Altro'
+];
 let callbackCounter = 0;
 let utenteCorrente = localStorage.getItem('utenteSpesa');
 let testMode = localStorage.getItem('testModeSpesa') === 'true';
@@ -401,6 +408,7 @@ function setBusy(busy) {
   document.getElementById('btnConfermaImport').disabled = busy;
   document.querySelectorAll('.azione').forEach(btn => btn.disabled = busy);
   document.querySelectorAll('.azione-preso').forEach(btn => btn.disabled = busy || btn.closest('.riga-prodotto').classList.contains('preso'));
+  document.querySelectorAll('.selettore-categoria').forEach(select => select.disabled = busy);
   document.getElementById('testMode').disabled = busy;
   aggiornaPulsanteVoce();
 }
@@ -477,13 +485,31 @@ function mostraLista(lista) {
     return;
   }
 
-  lista.forEach(item => {
+  raggruppaCategorieClient(lista).forEach(gruppo => {
+    const titolo = document.createElement('h2');
+    titolo.className = 'categoria-sezione';
+    titolo.textContent = gruppo.categoria;
+    contenitore.appendChild(titolo);
+    gruppo.elementi.forEach(item => {
     const riga = document.createElement('div');
     riga.className = 'riga-prodotto';
 
     const nome = document.createElement('div');
     nome.className = 'nome-prodotto';
     nome.textContent = item.prodotto;
+
+    const categoria = document.createElement('select');
+    categoria.className = 'selettore-categoria';
+    categoria.setAttribute('aria-label', `Categoria ${item.prodotto}`);
+    CATEGORIE.forEach(nomeCategoria => {
+      const opzione = document.createElement('option');
+      opzione.value = nomeCategoria;
+      opzione.textContent = nomeCategoria;
+      opzione.selected = (item.categoria || 'Altro') === nomeCategoria;
+      categoria.appendChild(opzione);
+    });
+    categoria.disabled = operazioneInCorso;
+    categoria.onchange = () => cambiaCategoria(item, categoria.value);
 
     const meno = document.createElement('button');
     meno.className = 'azione';
@@ -507,11 +533,41 @@ function mostraLista(lista) {
     cestino.disabled = operazioneInCorso;
     cestino.onclick = () => rimuovi(item);
 
-    riga.append(nome, meno, quantita, piu, cestino);
+    riga.append(nome, categoria, meno, quantita, piu, cestino);
     contenitore.appendChild(riga);
+    });
   });
 
   if (schermataCorrente === 'acquisti') mostraListaAcquisti(lista);
+}
+
+function raggruppaCategorieClient(lista) {
+  const gruppi = new Map(CATEGORIE.map(categoria => [categoria, []]));
+  (lista || []).forEach(item => {
+    const categoria = CATEGORIE.includes(item.categoria) ? item.categoria : 'Altro';
+    gruppi.get(categoria).push(item);
+  });
+  return CATEGORIE
+    .map(categoria => ({ categoria, elementi: gruppi.get(categoria) }))
+    .filter(gruppo => gruppo.elementi.length > 0);
+}
+
+async function cambiaCategoria(item, categoria) {
+  if (operazioneInCorso) return;
+  const precedente = item.categoria || 'Altro';
+  item.categoria = categoria;
+  mostraLista(listaCorrente);
+  setBusy(true);
+  try {
+    await postSenzaCors({ action: 'categoria', prodotto: item.prodotto, categoria });
+  } catch (error) {
+    item.categoria = precedente;
+    mostraErrore(error);
+  } finally {
+    setBusy(false);
+    mostraLista(listaCorrente);
+    riconciliaInBackground();
+  }
 }
 
 function sincronizzaProdottiPresi(lista) {
@@ -536,7 +592,12 @@ function mostraListaAcquisti(lista) {
     return;
   }
 
-  lista.forEach(item => {
+  raggruppaCategorieClient(lista).forEach(gruppo => {
+    const titolo = document.createElement('h2');
+    titolo.className = 'categoria-sezione';
+    titolo.textContent = gruppo.categoria;
+    contenitore.appendChild(titolo);
+    gruppo.elementi.forEach(item => {
     const chiave = normalizzaClient(item.prodotto);
     const preso = prodottiPresi.has(chiave);
     const riga = document.createElement('div');
@@ -556,6 +617,7 @@ function mostraListaAcquisti(lista) {
     bottone.onclick = () => segnaPreso(item.prodotto);
     riga.append(nome, quantita, bottone);
     contenitore.appendChild(riga);
+    });
   });
 }
 
@@ -580,7 +642,12 @@ async function postSenzaCors(dati) {
 
 function trovaIndice(lista, prodotto) {
   const key = normalizzaClient(prodotto);
-  return lista.findIndex(item => normalizzaClient(item.prodotto) === key);
+  const esatto = lista.findIndex(item => normalizzaClient(item.prodotto) === key);
+  if (esatto >= 0) return esatto;
+  const simili = lista
+    .map((item, indice) => ({ item, indice }))
+    .filter(({ item }) => nomiProdottiSimiliClient(item.prodotto, prodotto));
+  return simili.length === 1 ? simili[0].indice : -1;
 }
 
 function trovaInLista(lista, prodotto) {
@@ -961,7 +1028,30 @@ function raggruppaImportazioneClient(elementi) {
 }
 
 function normalizzaClient(testo) {
-  return String(testo || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return String(testo || '').trim().replace(/\s+/g, ' ').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function nomiProdottiSimiliClient(primo, secondo) {
+  const a = normalizzaClient(primo);
+  const b = normalizzaClient(secondo);
+  if (a.length < 5 || b.length < 5 || a.slice(0, 3) !== b.slice(0, 3)) return false;
+  return a === b || distanzaLevenshteinClient(a, b) <= 1;
+}
+
+function distanzaLevenshteinClient(a, b) {
+  const riga = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diagonale = riga[0];
+    riga[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const sopra = riga[j];
+      riga[j] = a[i - 1] === b[j - 1]
+        ? diagonale
+        : Math.min(diagonale + 1, sopra + 1, riga[j - 1] + 1);
+      diagonale = sopra;
+    }
+  }
+  return riga[b.length];
 }
 
 function attesa(ms) {
