@@ -100,9 +100,16 @@ class FakeSheet {
   }
 }
 
-function loadAppsScript({ listaRows, storicoRows = [['Prodotto', 'Quantità', 'Data']] }) {
+function loadAppsScript({
+  listaRows,
+  storicoRows = [['Prodotto', 'Quantità', 'Data']],
+  testListaRows = [['Prodotto', 'Quantità', 'Data', 'Autore']],
+  testStoricoRows = [['Prodotto', 'Quantità', 'Data']]
+}) {
   const lista = new FakeSheet(listaRows);
   const storico = new FakeSheet(storicoRows);
+  const testLista = new FakeSheet(testListaRows);
+  const testStorico = new FakeSheet(testStoricoRows);
   let flushes = 0;
   let lockWaits = 0;
   let lockReleases = 0;
@@ -113,9 +120,20 @@ function loadAppsScript({ listaRows, storicoRows = [['Prodotto', 'Quantità', 'D
       return null;
     }
   };
+  const testSpreadsheet = {
+    getSheetByName(name) {
+      if (name === 'Lista Spesa') return testLista;
+      if (name === 'Storico') return testStorico;
+      return null;
+    }
+  };
   const context = vm.createContext({
     SpreadsheetApp: {
       getActiveSpreadsheet: () => spreadsheet,
+      openById: id => {
+        assert.equal(id, '1uW9phsPDSAuMz2mEOCJVQy5rtBPTdUbD7qH6cx-NejQ');
+        return testSpreadsheet;
+      },
       flush: () => { flushes++; }
     },
     Utilities: {
@@ -140,10 +158,47 @@ function loadAppsScript({ listaRows, storicoRows = [['Prodotto', 'Quantità', 'D
   return {
     lista,
     storico,
+    testLista,
+    testStorico,
     getFunction,
     metrics: () => ({ flushes, lockWaits, lockReleases })
   };
 }
+
+test('TEST_MODE routes reads and writes only to ListaSpesaTest', () => {
+  const app = loadAppsScript({
+    listaRows: [
+      ['Prodotto', 'Quantità', 'Data', 'Autore'],
+      ['Prodotto reale', 1, '18/09/2026', 'Giulio']
+    ],
+    testListaRows: [
+      ['Prodotto', 'Quantità', 'Data', 'Autore'],
+      ['Prodotto test', 2, '18/09/2026', 'Alice']
+    ]
+  });
+
+  assert.deepEqual(
+    Array.from(app.getFunction('getListaSpesa')(true), item => ({ ...item })),
+    [{ prodotto: 'Prodotto test', quantita: 2 }]
+  );
+  const result = app.getFunction('aggiungiProdotto')('3 banane', 'Alice', true);
+  assert.equal(result.ok, true);
+  assert.deepEqual(app.testLista.appendedRows, [['Banane', 3, '18/09/2026', 'Alice']]);
+  assert.deepEqual(app.lista.rows, [
+    ['Prodotto', 'Quantità', 'Data', 'Autore'],
+    ['Prodotto reale', 1, '18/09/2026', 'Giulio']
+  ]);
+});
+
+test('TEST_MODE accepts only the boolean true or the string true', () => {
+  const app = loadAppsScript({ listaRows: [['Prodotto', 'Quantità', 'Data', 'Autore']] });
+  const isTestMode = app.getFunction('isTestMode');
+  assert.equal(isTestMode(true), true);
+  assert.equal(isTestMode('true'), true);
+  assert.equal(isTestMode(false), false);
+  assert.equal(isTestMode('false'), false);
+  assert.equal(isTestMode('1'), false);
+});
 
 test('REQ-LIFE-001: list reads and duplicate lookup do not depend on legacy state', () => {
   const app = loadAppsScript({

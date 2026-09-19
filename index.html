@@ -27,6 +27,15 @@
     .vuota { font-size: 18px; color: #666; }
     .azione-principale { width: 100%; padding: 14px; font-size: 20px; }
     .azione-secondaria { width: 100%; padding: 12px; font-size: 16px; }
+    .navigazione { display: flex; gap: 10px; margin-bottom: 20px; }
+    .navigazione button { flex: 1; padding: 12px 8px; font-size: 17px; }
+    .riga-prodotto.preso { background: #d9f7df; }
+    .azione-preso { min-width: 74px; padding: 10px 12px; border: 1px solid #087f3f; border-radius: 8px; background: #fff; color: #075f31; font-size: 17px; font-weight: bold; }
+    .azione-preso:disabled { background: #087f3f; color: #fff; opacity: 1; }
+    .admin-card { padding: 18px; border: 1px solid #ddd; border-radius: 12px; }
+    .admin-card label { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: bold; }
+    .admin-card input { flex: none; width: 24px; height: 24px; }
+    .sheet-link { display: block; margin-top: 20px; font-size: 18px; }
     #sceltaUtente { margin-bottom: 24px; padding: 18px; border: 1px solid #ddd; border-radius: 12px; }
     .scelta-titolo { font-size: 20px; margin-bottom: 14px; }
     .scelta-bottoni { display: flex; gap: 12px; }
@@ -48,9 +57,17 @@
   </style>
 </head>
 <body>
-  <h1>🛒 Spesa</h1>
+  <h1 id="titoloSchermata">🛒 Ordini</h1>
 
   <button id="btnInstalla" class="install-button" type="button" hidden>⬇ Installa app</button>
+
+  <div id="messaggio" aria-live="polite"></div>
+
+  <main id="schermataOrdini">
+  <div class="navigazione">
+    <button id="btnAcquisti" type="button">🛍️ Acquisti</button>
+    <button id="btnAdmin" type="button">⚙️ Admin</button>
+  </div>
 
   <div id="sceltaUtente" style="display:none;">
     <div class="scelta-titolo">Chi usa questa app?</div>
@@ -71,8 +88,6 @@
     <button id="btnAggiungi" class="add-button" onclick="aggiungi()">Aggiungi</button>
   </div>
 
-  <div id="messaggio" aria-live="polite"></div>
-
   <button id="btnApriImport" class="azione-secondaria import-open" type="button">📋 Importa note</button>
   <section id="pannelloImport" class="import-panel" aria-labelledby="titoloImport" hidden>
     <label id="titoloImport" for="testoImport">Incolla la lista, un prodotto per riga</label>
@@ -88,19 +103,46 @@
 
   <div id="lista"></div>
 
-  <div style="margin-top:32px;">
-    <button id="btnChiudi" class="azione-principale" onclick="chiudiSpesa()">✅ Spesa fatta</button>
-  </div>
-
   <div style="margin-top:12px;">
     <button id="btnPulisci" class="azione-secondaria" onclick="confermaPulisciStorico()">🧹 Pulisci storico</button>
   </div>
+  </main>
+
+  <main id="schermataAcquisti" hidden>
+    <div class="navigazione">
+      <button class="btn-ordini" type="button">← Ordini</button>
+    </div>
+    <div id="listaAcquisti"></div>
+    <div style="margin-top:32px;">
+      <button id="btnChiudi" class="azione-principale" onclick="chiudiSpesa()">✅ Spesa completata</button>
+    </div>
+  </main>
+
+  <main id="schermataAdmin" hidden>
+    <div class="navigazione">
+      <button class="btn-ordini" type="button">← Ordini</button>
+    </div>
+    <div class="admin-card">
+      <label for="testMode">
+        <input id="testMode" type="checkbox">
+        TEST_MODE
+      </label>
+      <a id="linkGoogleSheet" class="sheet-link" target="_blank" rel="noopener noreferrer">Apri il Google Sheet in uso</a>
+    </div>
+  </main>
 
 <script>
 const API = 'https://script.google.com/macros/s/AKfycbwFtJfXrdXZEuqq_nNgkepgpAqwaBsStzMLntpTX9eXICt52dJtv78BiUPYVbMZT5Q6/exec';
+const SHEET_URLS = {
+  produzione: 'https://docs.google.com/spreadsheets/d/1KV6cHvvtuRLwFsmSdnSod44_Vc0ElEoAZEIoLUj-YHA/edit',
+  test: 'https://docs.google.com/spreadsheets/d/1uW9phsPDSAuMz2mEOCJVQy5rtBPTdUbD7qH6cx-NejQ/edit'
+};
 let callbackCounter = 0;
 let utenteCorrente = localStorage.getItem('utenteSpesa');
+let testMode = localStorage.getItem('testModeSpesa') === 'true';
 let listaCorrente = [];
+let prodottiPresi = caricaProdottiPresi();
+let schermataCorrente = 'ordini';
 let operazioneInCorso = false;
 let reconcileToken = 0;
 let installPrompt = null;
@@ -114,6 +156,7 @@ let elementiImportAnalizzati = [];
 if (!utenteCorrente) document.getElementById('sceltaUtente').style.display = 'block';
 aggiornaUtenteUI();
 configuraRiconoscimentoVocale();
+aggiornaAdminUI();
 
 function impostaUtente(nome) {
   utenteCorrente = nome;
@@ -131,6 +174,103 @@ function cambiaUtente() {
 
 function aggiornaUtenteUI() {
   document.getElementById('nomeUtente').textContent = utenteCorrente || 'Nessuno';
+}
+
+function mostraSchermata(nome) {
+  schermataCorrente = nome;
+  document.getElementById('schermataOrdini').hidden = nome !== 'ordini';
+  document.getElementById('schermataAcquisti').hidden = nome !== 'acquisti';
+  document.getElementById('schermataAdmin').hidden = nome !== 'admin';
+  const titoli = { ordini: '🛒 Ordini', acquisti: '🛍️ Acquisti', admin: '⚙️ Admin' };
+  document.getElementById('titoloSchermata').textContent = titoli[nome];
+  document.getElementById('messaggio').textContent = '';
+  if (nome === 'acquisti') mostraListaAcquisti(listaCorrente);
+}
+
+function chiaveProdottiPresi() {
+  return testMode ? 'prodottiPresiSpesaTest' : 'prodottiPresiSpesa';
+}
+
+function caricaProdottiPresi() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(testMode ? 'prodottiPresiSpesaTest' : 'prodottiPresiSpesa') || '[]'));
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function salvaProdottiPresi() {
+  localStorage.setItem(chiaveProdottiPresi(), JSON.stringify(Array.from(prodottiPresi)));
+}
+
+function aggiornaAdminUI() {
+  document.getElementById('testMode').checked = testMode;
+  const link = document.getElementById('linkGoogleSheet');
+  link.href = testMode ? SHEET_URLS.test : SHEET_URLS.produzione;
+  link.textContent = testMode ? 'Apri ListaSpesaTest' : 'Apri ListaSpesa';
+}
+
+async function cambiaTestMode(event) {
+  if (operazioneInCorso) {
+    event.target.checked = testMode;
+    return;
+  }
+  const modalitaRichiesta = event.target.checked;
+  testMode = modalitaRichiesta;
+  setBusy(true);
+  if (modalitaRichiesta) {
+    try {
+      await verificaTestModeBackend();
+    } catch (error) {
+      testMode = false;
+      localStorage.setItem('testModeSpesa', 'false');
+      prodottiPresi = caricaProdottiPresi();
+      aggiornaAdminUI();
+      document.getElementById('messaggio').textContent = 'TEST_MODE non disponibile: il backend non ha confermato ListaSpesaTest.';
+      setBusy(false);
+      return;
+    }
+  }
+  localStorage.setItem('testModeSpesa', String(testMode));
+  prodottiPresi = caricaProdottiPresi();
+  reconcileToken++;
+  listaCorrente = [];
+  aggiornaAdminUI();
+  document.getElementById('messaggio').textContent = testMode
+    ? 'TEST_MODE attivo: uso ListaSpesaTest.'
+    : 'TEST_MODE disattivato: uso ListaSpesa.';
+  try {
+    await caricaLista();
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function verificaTestModeBackend() {
+  const ambiente = await jsonp({ action: 'ambiente' });
+  if (!ambiente.ok || ambiente.testMode !== true || ambiente.spreadsheet !== 'ListaSpesaTest') {
+    throw new Error('Il backend non ha confermato ListaSpesaTest.');
+  }
+}
+
+async function inizializzaApp() {
+  setBusy(true);
+  if (testMode) {
+    try {
+      await verificaTestModeBackend();
+    } catch (_) {
+      testMode = false;
+      localStorage.setItem('testModeSpesa', 'false');
+      prodottiPresi = caricaProdottiPresi();
+      aggiornaAdminUI();
+      document.getElementById('messaggio').textContent = 'TEST_MODE disattivato: il backend non ha confermato ListaSpesaTest.';
+    }
+  }
+  try {
+    await caricaLista();
+  } finally {
+    setBusy(false);
+  }
 }
 
 function appInStandalone() {
@@ -260,6 +400,8 @@ function setBusy(busy) {
   document.getElementById('btnAnnullaImport').disabled = busy;
   document.getElementById('btnConfermaImport').disabled = busy;
   document.querySelectorAll('.azione').forEach(btn => btn.disabled = busy);
+  document.querySelectorAll('.azione-preso').forEach(btn => btn.disabled = busy || btn.closest('.riga-prodotto').classList.contains('preso'));
+  document.getElementById('testMode').disabled = busy;
   aggiornaPulsanteVoce();
 }
 
@@ -289,7 +431,7 @@ function jsonp(params) {
     window[callbackName] = data => cleanup(null, data);
     script.onerror = () => cleanup(new Error('Impossibile leggere il backend.'));
 
-    const query = new URLSearchParams({ ...params, callback: callbackName, _: String(Date.now()) });
+    const query = new URLSearchParams({ ...params, testMode: String(testMode), callback: callbackName, _: String(Date.now()) });
     script.src = API + '?' + query.toString();
     document.head.appendChild(script);
   });
@@ -302,16 +444,20 @@ async function leggiLista() {
 }
 
 async function caricaLista() {
+  const mioToken = ++reconcileToken;
   try {
+    let nuovaLista;
     for (let tentativo = 0; tentativo < 3; tentativo++) {
       try {
-        listaCorrente = await leggiLista();
+        nuovaLista = await leggiLista();
         break;
       } catch (error) {
         if (tentativo === 2) throw error;
         await attesa(700);
       }
     }
+    if (mioToken !== reconcileToken) return listaCorrente;
+    listaCorrente = nuovaLista;
     mostraLista(listaCorrente);
     return listaCorrente;
   } catch (error) {
@@ -323,9 +469,11 @@ async function caricaLista() {
 function mostraLista(lista) {
   const contenitore = document.getElementById('lista');
   contenitore.innerHTML = '';
+  sincronizzaProdottiPresi(lista || []);
 
   if (!lista || lista.length === 0) {
     contenitore.innerHTML = '<div class="vuota">Niente da comprare.</div>';
+    if (schermataCorrente === 'acquisti') mostraListaAcquisti(lista);
     return;
   }
 
@@ -362,6 +510,63 @@ function mostraLista(lista) {
     riga.append(nome, meno, quantita, piu, cestino);
     contenitore.appendChild(riga);
   });
+
+  if (schermataCorrente === 'acquisti') mostraListaAcquisti(lista);
+}
+
+function sincronizzaProdottiPresi(lista) {
+  const presenti = new Set((lista || []).map(item => normalizzaClient(item.prodotto)));
+  let cambiato = false;
+  prodottiPresi.forEach(chiave => {
+    if (!presenti.has(chiave)) {
+      prodottiPresi.delete(chiave);
+      cambiato = true;
+    }
+  });
+  if (cambiato) salvaProdottiPresi();
+}
+
+function mostraListaAcquisti(lista) {
+  const contenitore = document.getElementById('listaAcquisti');
+  contenitore.replaceChildren();
+  sincronizzaProdottiPresi(lista);
+
+  if (!lista || lista.length === 0) {
+    contenitore.innerHTML = '<div class="vuota">Niente da comprare.</div>';
+    return;
+  }
+
+  lista.forEach(item => {
+    const chiave = normalizzaClient(item.prodotto);
+    const preso = prodottiPresi.has(chiave);
+    const riga = document.createElement('div');
+    riga.className = 'riga-prodotto' + (preso ? ' preso' : '');
+
+    const nome = document.createElement('div');
+    nome.className = 'nome-prodotto';
+    nome.textContent = item.prodotto;
+    const quantita = document.createElement('div');
+    quantita.className = 'quantita';
+    quantita.textContent = item.quantita;
+    const bottone = document.createElement('button');
+    bottone.className = 'azione-preso';
+    bottone.type = 'button';
+    bottone.textContent = 'Preso';
+    bottone.disabled = operazioneInCorso || preso;
+    bottone.onclick = () => segnaPreso(item.prodotto);
+    riga.append(nome, quantita, bottone);
+    contenitore.appendChild(riga);
+  });
+}
+
+function segnaPreso(prodotto) {
+  if (operazioneInCorso) return;
+  prodottiPresi.add(normalizzaClient(prodotto));
+  salvaProdottiPresi();
+  mostraListaAcquisti(listaCorrente);
+  if (listaCorrente.length > 0 && listaCorrente.every(item => prodottiPresi.has(normalizzaClient(item.prodotto)))) {
+    alert('Spesa completata');
+  }
 }
 
 async function postSenzaCors(dati) {
@@ -369,7 +574,7 @@ async function postSenzaCors(dati) {
     method: 'POST',
     mode: 'no-cors',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(dati)
+    body: JSON.stringify({ ...dati, testMode })
   }), 5000, 'Timeout durante la scrittura.');
 }
 
@@ -633,7 +838,10 @@ async function chiudiSpesa() {
 
   setBusy(true);
   const backup = listaCorrente.slice();
+  const backupPresi = new Set(prodottiPresi);
   listaCorrente = [];
+  prodottiPresi.clear();
+  salvaProdottiPresi();
   mostraLista(listaCorrente);
   document.getElementById('messaggio').textContent = 'Spesa salvata nello storico.';
 
@@ -641,6 +849,8 @@ async function chiudiSpesa() {
     await postSenzaCors({ action: 'chiudi' });
   } catch (error) {
     listaCorrente = backup;
+    prodottiPresi = backupPresi;
+    salvaProdottiPresi();
     mostraErrore(error);
   } finally {
     setBusy(false);
@@ -770,10 +980,14 @@ document.getElementById('btnAnalizzaImport').addEventListener('click', analizzaI
 document.getElementById('btnAnnullaImport').addEventListener('click', annullaImportazione);
 document.getElementById('btnConfermaImport').addEventListener('click', confermaImportazione);
 document.getElementById('testoImport').addEventListener('input', invalidaAnalisiImportazione);
+document.getElementById('btnAcquisti').addEventListener('click', () => mostraSchermata('acquisti'));
+document.getElementById('btnAdmin').addEventListener('click', () => mostraSchermata('admin'));
+document.querySelectorAll('.btn-ordini').forEach(btn => btn.addEventListener('click', () => mostraSchermata('ordini')));
+document.getElementById('testMode').addEventListener('change', cambiaTestMode);
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
 
-caricaLista().catch(() => {});
+inizializzaApp().catch(() => {});
 </script>
 </body>
 </html>

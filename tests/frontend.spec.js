@@ -2,6 +2,130 @@ const { test, expect } = require('@playwright/test');
 
 test.use({ serviceWorkers: 'block' });
 
+test('ORDINI, ACQUISTI and ADMIN keep their responsibilities separate', async ({ page }) => {
+  const lista = [
+    { prodotto: 'Latte', quantita: 2 },
+    { prodotto: 'Pane', quantita: 1 }
+  ];
+  const posts = [];
+  await page.route('https://script.google.com/**', async route => {
+    const request = route.request();
+    if (request.method() === 'GET') {
+      const callback = new URL(request.url()).searchParams.get('callback');
+      return route.fulfill({
+        contentType: 'application/javascript',
+        body: `${callback}(${JSON.stringify({ ok: true, lista })});`
+      });
+    }
+    posts.push(JSON.parse(request.postData() || '{}'));
+    return route.fulfill({ status: 200, body: '' });
+  });
+
+  await page.goto('/');
+  await expect(page.locator('#titoloSchermata')).toHaveText('🛒 Ordini');
+  await expect(page.locator('#btnChiudi')).toBeHidden();
+  await page.locator('#btnAcquisti').click();
+
+  await expect(page.locator('#titoloSchermata')).toHaveText('🛍️ Acquisti');
+  await expect(page.locator('#listaAcquisti .riga-prodotto')).toHaveCount(2);
+  await expect(page.locator('#listaAcquisti .quantita')).toHaveText(['2', '1']);
+  await expect(page.locator('#listaAcquisti .azione')).toHaveCount(0);
+  await expect(page.locator('#btnChiudi')).toBeVisible();
+
+  const dialogs = [];
+  page.on('dialog', async dialog => {
+    dialogs.push(dialog.message());
+    await dialog.accept();
+  });
+  const rows = page.locator('#listaAcquisti .riga-prodotto');
+  await rows.nth(0).getByRole('button', { name: 'Preso' }).click();
+  await expect(rows.nth(0)).toHaveClass(/preso/);
+  expect(dialogs).toEqual([]);
+  await rows.nth(1).getByRole('button', { name: 'Preso' }).click();
+  await expect(rows.nth(1)).toHaveClass(/preso/);
+  await expect.poll(() => dialogs).toEqual(['Spesa completata']);
+  expect(posts).toEqual([]);
+  await page.locator('#btnChiudi').click();
+  await expect.poll(() => posts).toHaveLength(1);
+  expect(posts[0]).toMatchObject({ action: 'chiudi', testMode: false });
+  expect(dialogs[1]).toContain('Confermi che la spesa è fatta?');
+
+  await page.getByRole('button', { name: 'Ordini' }).click();
+  await page.locator('#btnAdmin').click();
+  await expect(page.locator('#titoloSchermata')).toHaveText('⚙️ Admin');
+  await expect(page.locator('#testMode')).toBeVisible();
+  await expect(page.locator('#linkGoogleSheet')).toHaveText('Apri ListaSpesa');
+});
+
+test('ADMIN TEST_MODE switches every backend request and the Sheet link', async ({ page }) => {
+  const reads = [];
+  const posts = [];
+  await page.route('https://script.google.com/**', async route => {
+    const request = route.request();
+    if (request.method() === 'GET') {
+      const url = new URL(request.url());
+      const mode = url.searchParams.get('testMode');
+      reads.push(mode);
+      const callback = url.searchParams.get('callback');
+      if (url.searchParams.get('action') === 'ambiente') {
+        return route.fulfill({
+          contentType: 'application/javascript',
+          body: `${callback}(${JSON.stringify({ ok: true, testMode: true, spreadsheet: 'ListaSpesaTest' })});`
+        });
+      }
+      const lista = mode === 'true' ? [{ prodotto: 'Solo test', quantita: 1 }] : [];
+      return route.fulfill({
+        contentType: 'application/javascript',
+        body: `${callback}(${JSON.stringify({ ok: true, lista })});`
+      });
+    }
+    posts.push(JSON.parse(request.postData() || '{}'));
+    return route.fulfill({ status: 200, body: '' });
+  });
+
+  await page.goto('/');
+  await page.locator('#btnAdmin').click();
+  await page.locator('#testMode').check();
+  await expect(page.locator('#linkGoogleSheet')).toHaveText('Apri ListaSpesaTest');
+  await expect(page.locator('#linkGoogleSheet')).toHaveAttribute('href', /1uW9phsPDSAuMz2mEOCJVQy5rtBPTdUbD7qH6cx-NejQ/);
+  await page.getByRole('button', { name: 'Ordini' }).click();
+  await expect(page.locator('#lista .nome-prodotto')).toHaveText('Solo test');
+  await page.getByRole('button', { name: 'Alice', exact: true }).click();
+  await page.locator('#prodotto').fill('Mele');
+  await page.locator('#btnAggiungi').click();
+  await expect.poll(() => posts.length).toBeGreaterThan(0);
+  expect(posts[0].testMode).toBe(true);
+  expect(reads).toContain('false');
+  expect(reads).toContain('true');
+});
+
+test('TEST_MODE fails closed when the backend cannot confirm ListaSpesaTest', async ({ page }) => {
+  const posts = [];
+  await page.addInitScript(() => localStorage.setItem('testModeSpesa', 'true'));
+  await page.route('https://script.google.com/**', async route => {
+    const request = route.request();
+    if (request.method() === 'POST') {
+      posts.push(JSON.parse(request.postData() || '{}'));
+      return route.fulfill({ status: 200, body: '' });
+    }
+    const url = new URL(request.url());
+    const callback = url.searchParams.get('callback');
+    const data = url.searchParams.get('action') === 'ambiente'
+      ? { ok: false, messaggio: 'Azione GET non riconosciuta.' }
+      : { ok: true, lista: [] };
+    return route.fulfill({
+      contentType: 'application/javascript',
+      body: `${callback}(${JSON.stringify(data)});`
+    });
+  });
+
+  await page.goto('/');
+  await page.locator('#btnAdmin').click();
+  await expect(page.locator('#testMode')).not.toBeChecked();
+  await expect(page.locator('#linkGoogleSheet')).toHaveText('Apri ListaSpesa');
+  expect(posts).toEqual([]);
+});
+
 test('initial list read recovers from a transient backend failure without reload', async ({ page }) => {
   let reads = 0;
   await page.route('https://script.google.com/**', async route => {
@@ -308,7 +432,7 @@ test('REQ-IMPORT-001: confirmation sends one bulk request and keeps maximum quan
   await expect(page.locator('.nome-prodotto')).toHaveText(['Banane', 'Mele']);
   await expect(page.locator('.quantita')).toHaveText(['5', '5']);
   expect(posts).toHaveLength(1);
-  expect(posts[0]).toEqual({ action: 'importa', testo: pasted, utente: 'Alice' });
+  expect(posts[0]).toEqual({ action: 'importa', testo: pasted, utente: 'Alice', testMode: false });
   await expect(page.locator('#btnApriImport')).toBeEnabled();
 });
 

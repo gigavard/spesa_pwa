@@ -7,12 +7,22 @@ const path = require('node:path');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const api = html.match(/const API = '([^']+)'/)[1];
 
+async function assertTestBackend(request) {
+  const response = await request.get(api, {
+    params: { action: 'ambiente', testMode: 'true', _: randomUUID() },
+    timeout: 20000
+  });
+  expect(response.ok(), `Backend environment HTTP status ${response.status()}`).toBeTruthy();
+  const data = await response.json();
+  expect(data).toMatchObject({ ok: true, testMode: true, spreadsheet: 'ListaSpesaTest' });
+}
+
 async function readSheet(request) {
   let lastError;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const response = await request.get(api, {
-        params: { action: 'lista', _: randomUUID() },
+        params: { action: 'lista', testMode: 'true', _: randomUUID() },
         timeout: 20000
       });
       expect(response.ok(), `Backend read HTTP status ${response.status()}`).toBeTruthy();
@@ -50,7 +60,7 @@ async function assertUsable(page, row, present) {
   await page.locator('#prodotto').clear();
 }
 
-test('browser CRUD is reconciled with the real Google Sheet without reload', async ({ page, request }, testInfo) => {
+test('browser CRUD is reconciled with ListaSpesaTest without reload', async ({ page, request }, testInfo) => {
   const product = `Codex e2e ${randomUUID()}`;
   const row = page.locator('.riga-prodotto').filter({
     has: page.locator('.nome-prodotto', { hasText: product })
@@ -63,8 +73,10 @@ test('browser CRUD is reconciled with the real Google Sheet without reload', asy
   });
 
   try {
-    // Fail before any write if persistence cannot be independently inspected.
+    // Fail before any write unless the deployed backend confirms the isolated Sheet.
+    await assertTestBackend(request);
     expect(await persistedQuantity(request, product)).toBe(null);
+    await page.addInitScript(() => localStorage.setItem('testModeSpesa', 'true'));
     await page.goto('/');
     await expect(page.locator('#lista')).not.toBeEmpty({ timeout: 20000 });
     await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
@@ -135,7 +147,7 @@ test('browser CRUD is reconciled with the real Google Sheet without reload', asy
           try {
             await request.post(api, {
               headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              data: JSON.stringify({ action: 'rimuovi', prodotto: product }),
+              data: JSON.stringify({ action: 'rimuovi', prodotto: product, testMode: true }),
               timeout: 15000
             });
           } catch (_) {
@@ -153,7 +165,7 @@ test('browser CRUD is reconciled with the real Google Sheet without reload', asy
   }
 });
 
-test('REQ-IMPORT-001: real Sheet bulk import deduplicates and keeps maximum quantities', async ({ request }, testInfo) => {
+test('REQ-IMPORT-001: ListaSpesaTest bulk import deduplicates and keeps maximum quantities', async ({ request }, testInfo) => {
   const runId = randomUUID();
   const firstProduct = `Codex import ${runId}`;
   const secondProduct = `Codex import altro ${runId}`;
@@ -167,7 +179,7 @@ test('REQ-IMPORT-001: real Sheet bulk import deduplicates and keeps maximum quan
         try {
           await request.post(api, {
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            data: JSON.stringify({ action: 'rimuovi', prodotto: product }),
+            data: JSON.stringify({ action: 'rimuovi', prodotto: product, testMode: true }),
             timeout: 15000
           });
         } catch (_) {
@@ -184,7 +196,7 @@ test('REQ-IMPORT-001: real Sheet bulk import deduplicates and keeps maximum quan
     try {
       await request.post(api, {
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        data: JSON.stringify({ action: 'importa', testo, utente }),
+        data: JSON.stringify({ action: 'importa', testo, utente, testMode: true }),
         timeout: 20000
       });
     } catch (_) {
@@ -193,6 +205,7 @@ test('REQ-IMPORT-001: real Sheet bulk import deduplicates and keeps maximum quan
   }
 
   try {
+    await assertTestBackend(request);
     for (const product of products) expect(await persistedQuantity(request, product)).toBe(null);
     mutationAttempted = true;
     await postImport(`2 ${firstProduct}\n${firstProduct} tre\n${secondProduct}`, 'Giulio');

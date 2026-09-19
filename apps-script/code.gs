@@ -1,5 +1,6 @@
 const NOME_LISTA = 'Lista Spesa';
 const NOME_STORICO = 'Storico';
+const TEST_SPREADSHEET_ID = '1uW9phsPDSAuMz2mEOCJVQy5rtBPTdUbD7qH6cx-NejQ';
 
 function doGet(e) {
   const p = e && e.parameter ? e.parameter : {};
@@ -14,7 +15,16 @@ function doGet(e) {
 
     switch (action) {
       case 'lista':
-        risposta = { ok: true, lista: getListaSpesa() };
+        risposta = { ok: true, lista: getListaSpesa(isTestMode(p.testMode)) };
+        break;
+      case 'ambiente':
+        const testMode = isTestMode(p.testMode);
+        getSpreadsheet(testMode);
+        risposta = {
+          ok: true,
+          testMode: testMode,
+          spreadsheet: testMode ? 'ListaSpesaTest' : 'ListaSpesa'
+        };
         break;
       default:
         risposta = { ok: false, messaggio: 'Azione GET non riconosciuta.' };
@@ -30,32 +40,33 @@ function doPost(e) {
   try {
     const dati = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     const action = dati.action;
+    const testMode = isTestMode(dati.testMode);
     let risposta;
 
     switch (action) {
       case 'aggiungi':
-        risposta = aggiungiProdotto(dati.testo, dati.utente);
+        risposta = aggiungiProdotto(dati.testo, dati.utente, testMode);
         break;
       case 'importa':
-        risposta = importaProdotti(dati.testo, dati.utente);
+        risposta = importaProdotti(dati.testo, dati.utente, testMode);
         break;
       case 'aumenta':
-        aumentaQuantitaProdotto(dati.prodotto);
+        aumentaQuantitaProdotto(dati.prodotto, testMode);
         risposta = { ok: true };
         break;
       case 'diminuisci':
-        diminuisciQuantitaProdotto(dati.prodotto);
+        diminuisciQuantitaProdotto(dati.prodotto, testMode);
         risposta = { ok: true };
         break;
       case 'rimuovi':
-        rimuoviProdotto(dati.prodotto);
+        rimuoviProdotto(dati.prodotto, testMode);
         risposta = { ok: true };
         break;
       case 'chiudi':
-        risposta = chiudiSpesa();
+        risposta = chiudiSpesa(testMode);
         break;
       case 'pulisciStorico':
-        pulisciStorico();
+        pulisciStorico(testMode);
         risposta = { ok: true };
         break;
       default:
@@ -88,8 +99,8 @@ function apiResponse(dati, callback) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function getListaSpesa() {
-  const sheet = getFoglio();
+function getListaSpesa(testMode) {
+  const sheet = getFoglio(testMode);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
@@ -110,9 +121,9 @@ function getListaSpesa() {
   return lista;
 }
 
-function aggiungiProdotto(testo, aggiuntoDa) {
+function aggiungiProdotto(testo, aggiuntoDa, testMode) {
   return conLock(function() {
-    const sheet = getFoglio();
+    const sheet = getFoglio(testMode);
     const input = String(testo || '').trim();
 
     if (!input) {
@@ -149,14 +160,14 @@ function aggiungiProdotto(testo, aggiuntoDa) {
   });
 }
 
-function importaProdotti(testo, aggiuntoDa) {
+function importaProdotti(testo, aggiuntoDa, testMode) {
   return conLock(function() {
     const elementi = raggruppaImportazione(parseTestoImportazione(testo));
     if (elementi.length === 0) {
       return { ok: false, messaggio: 'Incolla almeno un prodotto.' };
     }
 
-    const sheet = getFoglio();
+    const sheet = getFoglio(testMode);
     const lastRow = sheet.getLastRow();
     const valori = lastRow >= 2
       ? sheet.getRange(2, 1, lastRow - 1, 4).getValues()
@@ -213,9 +224,9 @@ function creaMessaggioImportazione(aggiunti, aggiornati, giaPresenti) {
     giaPresenti + ' già presenti.';
 }
 
-function aumentaQuantitaProdotto(prodotto) {
+function aumentaQuantitaProdotto(prodotto, testMode) {
   return conLock(function() {
-    const sheet = getFoglio();
+    const sheet = getFoglio(testMode);
     const item = trovaProdottoObbligatorio(sheet, prodotto);
     sheet.getRange(item.riga, 2).setValue(item.quantita + 1);
     SpreadsheetApp.flush();
@@ -223,9 +234,9 @@ function aumentaQuantitaProdotto(prodotto) {
   });
 }
 
-function diminuisciQuantitaProdotto(prodotto) {
+function diminuisciQuantitaProdotto(prodotto, testMode) {
   return conLock(function() {
-    const sheet = getFoglio();
+    const sheet = getFoglio(testMode);
     const item = trovaProdottoObbligatorio(sheet, prodotto);
 
     if (item.quantita > 1) {
@@ -239,9 +250,9 @@ function diminuisciQuantitaProdotto(prodotto) {
   });
 }
 
-function rimuoviProdotto(prodotto) {
+function rimuoviProdotto(prodotto, testMode) {
   return conLock(function() {
-    const sheet = getFoglio();
+    const sheet = getFoglio(testMode);
     const item = trovaProdottoObbligatorio(sheet, prodotto);
     sheet.deleteRow(item.riga);
     SpreadsheetApp.flush();
@@ -290,9 +301,9 @@ function conLock(fn) {
   }
 }
 
-function chiudiSpesa() {
+function chiudiSpesa(testMode) {
   return conLock(function() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSpreadsheet(testMode);
     const lista = ss.getSheetByName(NOME_LISTA);
     const storico = ss.getSheetByName(NOME_STORICO);
 
@@ -333,9 +344,9 @@ function chiudiSpesa() {
   });
 }
 
-function pulisciStorico() {
+function pulisciStorico(testMode) {
   return conLock(function() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSpreadsheet(testMode);
     const storico = ss.getSheetByName(NOME_STORICO);
 
     if (!storico) throw new Error('Foglio Storico non trovato');
@@ -349,16 +360,26 @@ function pulisciStorico() {
   });
 }
 
-function getFoglio() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+function getFoglio(testMode) {
+  const ss = getSpreadsheet(testMode);
   const sheet = ss.getSheetByName(NOME_LISTA);
   if (!sheet) throw new Error('Foglio "Lista Spesa" non trovato');
   return sheet;
 }
 
-function migraRimuoviColonnaStato() {
+function getSpreadsheet(testMode) {
+  return testMode
+    ? SpreadsheetApp.openById(TEST_SPREADSHEET_ID)
+    : SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function isTestMode(value) {
+  return value === true || String(value || '').toLowerCase() === 'true';
+}
+
+function migraRimuoviColonnaStato(testMode) {
   return conLock(function() {
-    const sheet = getFoglio();
+    const sheet = getFoglio(testMode);
     const intestazione = String(sheet.getRange(1, 5).getValue() || '').trim();
 
     if (!intestazione) {

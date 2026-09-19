@@ -9,20 +9,21 @@ Stato: Approvato.
 3. I test con backend pubblicato verificano l'integrazione reale con Apps Script e Google Sheet.
 4. Gli smoke test verificano la raggiungibilità delle versioni pubblicate senza modificare dati applicativi.
 
-## Uso del foglio condiviso
+## Uso dei fogli Google
 
-Il product owner ha autorizzato esplicitamente l'uso del Google Sheet condiviso per i test di sviluppo.
+`ListaSpesa` contiene dati reali ed è escluso da qualsiasi test che modifichi dati. I test di sviluppo che scrivono sul backend devono impostare esplicitamente `testMode: true` e usare soltanto `ListaSpesaTest`.
 
 Per conservare risultati leggibili e non confonderli con la spesa reale:
 
 - i prodotti creati automaticamente usano un nome univoco riconoscibile come dato di test;
+- prima della prima scrittura il test richiede `action=ambiente` e pretende la conferma esplicita di `ListaSpesaTest`;
 - ogni test CRUD o import bulk elimina soltanto i dati creati dalla propria esecuzione;
 - il test verifica lo stato persistito con una nuova lettura, perché la risposta POST `no-cors` è opaca;
 - una pulizia fallita viene segnalata e non viene nascosta;
 - i test concorrenti sul foglio sono serializzati;
 - non si inseriscono credenziali o dati personali nel repository.
 
-La chiusura della spesa sposta l'intera lista nello storico e la cancellazione dello storico elimina dati condivisi. Queste operazioni non possono essere isolate tramite il solo nome univoco del prodotto. I relativi test sul foglio condiviso devono quindi essere eseguiti in una finestra concordata o mediante un ambiente di test separato. L'autorizzazione generale a usare il foglio non implica la cancellazione indiscriminata dei dati presenti.
+La chiusura della spesa sposta l'intera lista nello storico e la cancellazione dello storico elimina dati condivisi. Queste operazioni non possono essere isolate tramite il solo nome univoco del prodotto. Anche su `ListaSpesaTest` devono quindi essere eseguite solo in una finestra concordata o su dati predisposti appositamente. Non devono mai essere eseguite automaticamente su `ListaSpesa`.
 
 ## Evidenze
 
